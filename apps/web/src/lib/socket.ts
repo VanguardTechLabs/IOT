@@ -33,7 +33,12 @@ export function getSocket(): Socket {
 
   socket = io({
     path: '/socket.io',
-    transports: ['websocket', 'polling'],
+    // No `transports` override on purpose. Naming them websocket-first looks like
+    // an optimisation, but engine.io-client only walks to the next transport when
+    // `tryAllTransports` is set — which it is not by default — so the polling entry
+    // was dead code and any WebSocket failure became a permanent outage instead of
+    // a silent degrade. The default (poll, then upgrade to websocket) is both
+    // faster to first byte and survives a proxy that mishandles upgrades.
     auth: (cb) => cb({ token: getAccessToken() }),
     reconnectionDelay: 500,
     reconnectionDelayMax: 5000,

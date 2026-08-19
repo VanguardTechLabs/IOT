@@ -1,3 +1,5 @@
+import type { IncomingMessage } from 'node:http';
+import type { Duplex } from 'node:stream';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
@@ -111,8 +113,6 @@ async function main() {
 
   await app.listen({ port: env.API_PORT, host: env.API_HOST });
 
-  // Socket.IO attaches after Fastify so engine.io can delegate non-/socket.io
-  // upgrades back to @fastify/websocket (the device uplink route).
   const io = attachRealtime(app.server, (token) => {
     try {
       const payload = app.jwt.verify<{ sub: string }>(token);
@@ -121,6 +121,38 @@ async function main() {
       return null;
     }
   });
+
+  // @fastify/websocket and engine.io each register their own 'upgrade' listener on
+  // this one server, and Node delivers the event to EVERY listener — they do not
+  // cooperate, and neither defers to the other.
+  //
+  // For a /socket.io/ upgrade that meant engine.io completed the 101 and took the
+  // socket over, while Fastify's router — finding no route for that path — wrote a
+  // 404 onto the very same socket a few milliseconds later. The browser, now
+  // reading a WebSocket stream, hit raw HTTP bytes and reported
+  // "Invalid frame header", then retried forever.
+  //
+  // Dispatch on the path instead of letting the two race. Fastify's listener is
+  // registered first (at plugin registration), engine.io's last (attachRealtime
+  // above), which is what the ordering below relies on.
+  const upgradeListeners = app.server.listeners('upgrade') as Array<
+    (req: IncomingMessage, socket: Duplex, head: Buffer) => void
+  >;
+  if (upgradeListeners.length > 1) {
+    const fastifyUpgrade = upgradeListeners[0]!;
+    const engineUpgrade = upgradeListeners[upgradeListeners.length - 1]!;
+    app.server.removeAllListeners('upgrade');
+    app.server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+      if (req.url?.startsWith('/socket.io/')) engineUpgrade(req, socket, head);
+      else fastifyUpgrade(req, socket, head);
+    });
+    log.info({ replaced: upgradeListeners.length }, 'websocket upgrade dispatch installed');
+  } else {
+    log.warn(
+      { found: upgradeListeners.length },
+      'expected two upgrade listeners; leaving dispatch untouched',
+    );
+  }
 
   log.info({ port: env.API_PORT }, 'api listening');
 
