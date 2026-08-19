@@ -103,15 +103,28 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
         return;
       }
 
-      const outcome = await ingest.handleUplink(device, payload, 'ws');
-      socket.send(
-        JSON.stringify({
-          type: 'ack',
-          accepted: outcome.accepted,
-          rejected: outcome.rejected,
-          throttled: outcome.throttled ?? false,
-        }),
-      );
+      // The listener is async and nothing observes its promise, so a throw here
+      // would surface as an unhandledRejection and terminate the whole API.
+      // handleUplink still awaits Redis and Postgres, either of which can reject.
+      try {
+        const outcome = await ingest.handleUplink(device, payload, 'ws');
+        socket.send(
+          JSON.stringify({
+            type: 'ack',
+            accepted: outcome.accepted,
+            rejected: outcome.rejected,
+            throttled: outcome.throttled ?? false,
+          }),
+        );
+      } catch (err) {
+        req.log.error(
+          { err: (err as Error).message, device: device.deviceKey },
+          'ws uplink failed',
+        );
+        if (socket.readyState === socket.OPEN) {
+          socket.send(JSON.stringify({ type: 'error', message: 'ingest failed' }));
+        }
+      }
     });
 
     const cleanup = async () => {

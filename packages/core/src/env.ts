@@ -22,7 +22,10 @@ const schema = z.object({
   PUBLIC_MQTT_PORT: int(1883),
   PUBLIC_MQTT_WS_PORT: int(8083),
 
-  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
+  // Optional: in Docker the connection comes from the discrete PG* variables
+  // instead, because a composed URL cannot carry an arbitrary password safely.
+  // getPool() requires one of the two and says so if neither is present.
+  DATABASE_URL: z.string().optional().default(''),
   REDIS_URL: z.string().default('redis://localhost:6379'),
 
   MQTT_URL: z.string().default('mqtt://localhost:1883'),

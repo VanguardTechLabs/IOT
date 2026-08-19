@@ -12,8 +12,14 @@ let poolRef: pg.Pool | null = null;
 
 export function getPool(): pg.Pool {
   if (!poolRef) {
+    // Prefer an explicit DATABASE_URL (host-run development); otherwise fall
+    // through to node-postgres' native PG* handling, which takes the password as
+    // raw bytes and never has to survive URL parsing.
+    if (!env.DATABASE_URL && !process.env.PGHOST) {
+      throw new Error('Set DATABASE_URL, or PGHOST/PGUSER/PGPASSWORD/PGDATABASE');
+    }
     poolRef = new pg.Pool({
-      connectionString: env.DATABASE_URL,
+      ...(env.DATABASE_URL ? { connectionString: env.DATABASE_URL } : {}),
       max: Number.parseInt(process.env.PG_POOL_MAX ?? '12', 10),
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,

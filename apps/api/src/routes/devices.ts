@@ -18,8 +18,36 @@ import {
   timeZoneSchema,
   topics,
 } from '@pulse/core';
+import type { MqttClient } from 'mqtt';
+import type { Redis } from 'ioredis';
 import { getContext } from '../context.js';
 import { notFound, parse, uuidParam } from '../lib/http.js';
+
+const DOWNLINK_PUBLISH_TIMEOUT_MS = 3_000;
+
+/**
+ * Sends one downlink frame on both paths — MQTT for broker-attached devices, Redis
+ * for the WebSocket uplink — and never lets a sick broker stall the HTTP request.
+ * mqtt.js buffers publishes while disconnected and only fires the callback after it
+ * reconnects, so the wait is bounded and a timeout is reported, not thrown.
+ *
+ * Returns whether the MQTT leg was acknowledged; the Redis leg is awaited directly.
+ */
+async function publishDownlink(
+  mqtt: MqttClient,
+  redis: Redis,
+  deviceKey: string,
+  frame: string,
+  retain: boolean,
+): Promise<boolean> {
+  await redis.publish(downlinkChannel(deviceKey), frame);
+  return Promise.race([
+    new Promise<boolean>((resolve) =>
+      mqtt.publish(topics.downlink(deviceKey), frame, { qos: 1, retain }, (err) => resolve(!err)),
+    ),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), DOWNLINK_PUBLISH_TIMEOUT_MS)),
+  ]);
+}
 
 const createSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -137,6 +165,16 @@ export const deviceRoutes: FastifyPluginAsync = async (app) => {
       .returning(deviceColumns);
 
     await broadcastInvalidation(device!.deviceKey);
+
+    // A changed interval has to reach the firmware, otherwise the panel field is
+    // decorative. Retained, so EMQX replays it the moment the sketch subscribes to
+    // d/<key>/dn — which is what makes the "applied on next connect" hint true.
+    if (body.intervalS !== undefined) {
+      const { mqtt, redis } = getContext();
+      const frame = JSON.stringify({ interval: String(device!.intervalS) });
+      await publishDownlink(mqtt, redis, device!.deviceKey, frame, true);
+    }
+
     return { device };
   });
 
@@ -249,15 +287,11 @@ export const deviceRoutes: FastifyPluginAsync = async (app) => {
     const value = typeof body.value === 'boolean' ? (body.value ? '1' : '0') : String(body.value);
     const frame = JSON.stringify({ [body.key]: value });
 
-    // Fan out on both paths — a device may be attached over MQTT or over the
-    // WebSocket uplink, and the panel does not need to know which.
+    // Audit row and the WebSocket leg first: neither depends on the broker, and a
+    // device attached over the WS uplink must still get its command when MQTT is
+    // down. The MQTT publish is then bounded, because mqtt.js queues the callback
+    // until it reconnects — which used to hang this request indefinitely.
     const { mqtt, redis } = getContext();
-    await new Promise<void>((resolve, reject) => {
-      mqtt.publish(topics.downlink(device.deviceKey), frame, { qos: 1 }, (err) =>
-        err ? reject(err) : resolve(),
-      );
-    });
-    await redis.publish(downlinkChannel(device.deviceKey), frame);
 
     await db.insert(tables.commands).values({
       deviceId: id,
@@ -268,6 +302,8 @@ export const deviceRoutes: FastifyPluginAsync = async (app) => {
       source: 'panel',
     });
 
-    return { ok: true, key: body.key, value };
+    const mqttOk = await publishDownlink(mqtt, redis, device.deviceKey, frame, false);
+
+    return { ok: true, key: body.key, value, mqtt: mqttOk };
   });
 };

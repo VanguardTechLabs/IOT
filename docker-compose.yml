@@ -28,7 +28,10 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Loopback only. This is the superuser port; ufw cannot filter it, because
+      # Docker's forward rules are consulted before ufw's INPUT chain. Reach it
+      # with `ssh -L 5432:localhost:5432`.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pulse} -d ${POSTGRES_DB:-pulse}"]
       interval: 5s
@@ -62,7 +65,7 @@ services:
       EMQX_AUTHORIZATION__SOURCES__1__DATABASE: ${POSTGRES_DB:-pulse}
       EMQX_AUTHORIZATION__SOURCES__1__USERNAME: ${POSTGRES_USER:-pulse}
       EMQX_AUTHORIZATION__SOURCES__1__PASSWORD: ${POSTGRES_PASSWORD}
-      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:-pulseadmin}
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:?set EMQX_DASHBOARD_PASSWORD in .env}
       # TLS on 8883, fed by the certsync sidecar. Inert until MQTT_TLS_ENABLED=true.
       EMQX_LISTENERS__SSL__DEFAULT__ENABLE: ${MQTT_TLS_ENABLED:-false}
       EMQX_LISTENERS__SSL__DEFAULT__BIND: "0.0.0.0:8883"
@@ -76,7 +79,8 @@ services:
       - "${EMQX_TCP_PORT:-1883}:1883"
       - "${EMQX_WS_PORT:-8083}:8083"
       - "${EMQX_TLS_PORT:-8883}:8883"
-      - "${EMQX_DASHBOARD_PORT:-18083}:18083"
+      # Loopback only — same reasoning as the Postgres port above.
+      - "127.0.0.1:${EMQX_DASHBOARD_PORT:-18083}:18083"
     healthcheck:
       test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
       interval: 10s
@@ -98,7 +102,15 @@ services:
       NODE_ENV: production
       SERVICE_NAME: pulse
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      DATABASE_URL: postgres://${POSTGRES_USER:-pulse}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-pulse}
+      # Discrete PG* variables rather than a composed DATABASE_URL: the password is
+      # interpolated verbatim, and `openssl rand -base64` routinely emits '/', '+'
+      # and '=', which silently corrupt a URL's authority section. node-postgres
+      # reads these natively and applies no URL parsing.
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-pulse}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-pulse}
       REDIS_URL: redis://redis:6379
       MQTT_URL: mqtt://emqx:1883
       MQTT_BACKEND_USER: ${MQTT_BACKEND_USER:-pulse-backend}

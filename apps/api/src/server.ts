@@ -47,7 +47,9 @@ async function main() {
 
   const app = Fastify({
     logger: { level: env.LOG_LEVEL },
-    trustProxy: true,
+    // Exactly one hop (Caddy). `true` would walk the whole X-Forwarded-For chain
+    // and hand back a client-supplied address, which is what req.ip is keyed on.
+    trustProxy: 1,
     bodyLimit: 1024 * 1024,
     disableRequestLogging: env.NODE_ENV === 'production',
   });
@@ -62,10 +64,12 @@ async function main() {
     max: 1200,
     timeWindow: '1 minute',
     redis,
-    keyGenerator: (req) =>
-      (req.headers['x-device-key'] as string | undefined) ??
-      (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ??
-      req.ip,
+    // Must not be derived from a request header: both x-device-key and
+    // x-forwarded-for are unauthenticated at this point, so a fresh random value
+    // per request would mint a fresh bucket and defeat the /auth brute-force
+    // limits entirely. Per-device uplink throttling happens after authentication,
+    // in consumeBurstToken().
+    keyGenerator: (req) => req.ip,
   });
   await app.register(websocket, { options: { maxPayload: 64 * 1024 } });
   await app.register(authPlugin);
@@ -135,6 +139,13 @@ async function main() {
 
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
+
+  // Backstop. Node's default for an unhandled rejection is to terminate, which on
+  // a telemetry ingest process means dropping whatever is still buffered. Every
+  // known path is guarded; this is here so an unknown one degrades to a log line.
+  process.on('unhandledRejection', (err) => {
+    log.error({ err: err instanceof Error ? err.message : String(err) }, 'unhandled rejection');
+  });
 }
 
 main().catch((err) => {

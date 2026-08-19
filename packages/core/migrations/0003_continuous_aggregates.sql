@@ -14,8 +14,12 @@
 -- watermark at "now". WITH NO DATA would leave every bucket older than the refresh
 -- policy's start_offset permanently unmaterialized and therefore invisible to a
 -- long-range chart.
+-- materialized_only = false is explicit rather than inherited: the default flipped
+-- across TimescaleDB versions, and with it left on the view returns only what the
+-- refresh policy has already materialized — so a long-range chart loses its most
+-- recent bucket or two, which is exactly the part anyone is looking at.
 CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry_1m
-WITH (timescaledb.continuous) AS
+WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS
 SELECT
   variable_id,
   time_bucket(INTERVAL '1 minute', ts) AS bucket,
@@ -39,7 +43,7 @@ SELECT add_continuous_aggregate_policy('telemetry_1m',
 -- pulse:split
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry_1h
-WITH (timescaledb.continuous) AS
+WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS
 SELECT
   variable_id,
   time_bucket(INTERVAL '1 hour', ts) AS bucket,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Download, KeyRound, Plus, Settings2, Trash2 } from 'lucide-react';
@@ -6,6 +6,7 @@ import {
   api,
   ApiError,
   getAccessToken,
+  refreshSession,
   type Device,
   type SeriesResponse,
   type StateEntry,
@@ -57,6 +58,8 @@ export function DeviceDetailPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [rotatedToken, setRotatedToken] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // The chart defaults apply once per device, not every time the selection empties.
+  const defaultsApplied = useRef(false);
 
   const stateQuery = useQuery({
     queryKey: ['device-state', id],
@@ -85,18 +88,32 @@ export function DeviceDetailPage() {
     refetchInterval: rangeMs <= 3_600_000 ? 15_000 : 60_000,
   });
 
-  // Default the chart to the first four numeric variables.
+  // Default the chart to the first four numeric variables — once. Keying this on
+  // `selected.size` re-applied the defaults the instant the user unticked the last
+  // variable, so clearing the chart was impossible.
   useEffect(() => {
-    if (selected.size > 0) return;
+    defaultsApplied.current = false;
+  }, [id]);
+
+  useEffect(() => {
+    if (defaultsApplied.current) return;
     const numeric = (stateQuery.data?.state ?? []).filter((s) => s.type !== 'string').slice(0, 4);
-    if (numeric.length > 0) setSelected(new Set(numeric.map((s) => s.variableId)));
-  }, [stateQuery.data, selected.size]);
+    if (numeric.length > 0) {
+      defaultsApplied.current = true;
+      setSelected(new Set(numeric.map((s) => s.variableId)));
+    }
+  }, [stateQuery.data]);
 
   // Live values: patch the cached state in place instead of refetching.
   useEffect(() => {
     if (!id) return;
     const socket = getSocket();
-    socket.emit('subscribe:device', id);
+    // Rooms live on the server side of a connection, so they do not survive a
+    // reconnect. Without re-joining, the page keeps rendering stale values after a
+    // brief network blip with nothing on screen to say the feed died.
+    const join = () => socket.emit('subscribe:device', id);
+    join();
+    socket.on('connect', join);
 
     const onTelemetry = (event: TelemetryEvent) => {
       if (event.deviceId !== id) return;
@@ -148,6 +165,7 @@ export function DeviceDetailPage() {
 
     return () => {
       socket.emit('unsubscribe:device', id);
+      socket.off('connect', join);
       socket.off('telemetry', onTelemetry);
       socket.off('device:status', onStatus);
       socket.off('variable:created', onVariableCreated);
@@ -196,11 +214,18 @@ export function DeviceDetailPage() {
     if (selected.size > 0) params.set('variableIds', [...selected].join(','));
 
     // The export route streams, so fetch it with the bearer token and hand the
-    // browser a blob rather than opening an unauthenticated URL.
-    const res = await fetch(`/api/v1/devices/${id}/export.csv?${params}`, {
-      headers: { Authorization: `Bearer ${getAccessToken() ?? ''}` },
-      credentials: 'include',
-    });
+    // browser a blob rather than opening an unauthenticated URL. This bypasses the
+    // api helper, so it has to retry the 401 refresh itself — otherwise an expired
+    // access token turns a 30-day export into a bare "Export failed".
+    const doFetch = () =>
+      fetch(`/api/v1/devices/${id}/export.csv?${params}`, {
+        headers: { Authorization: `Bearer ${getAccessToken() ?? ''}` },
+        credentials: 'include',
+      });
+
+    let res = await doFetch();
+    if (res.status === 401 && (await refreshSession())) res = await doFetch();
+
     if (!res.ok) {
       setToast('Export failed');
       return;
@@ -210,8 +235,11 @@ export function DeviceDetailPage() {
     const anchor = document.createElement('a');
     anchor.href = url;
     anchor.download = `${stateQuery.data?.device.name ?? 'device'}.csv`;
+    // Firefox ignores a click on an anchor that is not in the document.
+    document.body.appendChild(anchor);
     anchor.click();
-    URL.revokeObjectURL(url);
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }, [id, rangeMs, selected, stateQuery.data]);
 
   if (stateQuery.isLoading) return <Spinner />;

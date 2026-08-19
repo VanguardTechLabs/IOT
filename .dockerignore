@@ -2,6 +2,10 @@ node_modules
 **/node_modules
 dist
 **/dist
+# tsc trusts a buildinfo over the presence of its own output: a stale one in the
+# build context makes every `tsc` a silent no-op and ships an image with no dist.
+*.tsbuildinfo
+**/*.tsbuildinfo
 .git
 .env
 .env.*

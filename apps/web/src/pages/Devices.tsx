@@ -18,7 +18,7 @@ export function DevicesPage() {
   const [form, setForm] = useState({ name: '', description: '', intervalS: 10, timezone: browserTimeZone() });
   const [error, setError] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['devices'],
     queryFn: () => api.get<{ devices: Device[] }>('/devices'),
   });
@@ -63,7 +63,9 @@ export function DevicesPage() {
   });
 
   const devices = data?.devices ?? [];
-  const atLimit = plan ? devices.length >= plan.maxDevices : false;
+  // A failed fetch leaves `devices` empty, which must not read as "room for more" —
+  // the create would then fail server-side against the real plan limit anyway.
+  const atLimit = plan && !isError ? devices.length >= plan.maxDevices : false;
 
   return (
     <div className="space-y-6">
@@ -80,7 +82,7 @@ export function DevicesPage() {
             setError(null);
             setCreating(true);
           }}
-          disabled={atLimit}
+          disabled={atLimit || isError}
           title={atLimit ? 'Device limit reached for this plan' : undefined}
         >
           <Plus size={16} /> New device
@@ -95,6 +97,13 @@ export function DevicesPage() {
 
       {isLoading ? (
         <Spinner />
+      ) : isError ? (
+        <Alert>
+          Could not load your devices.{' '}
+          <button className="underline underline-offset-2" onClick={() => void refetch()}>
+            Retry
+          </button>
+        </Alert>
       ) : devices.length === 0 ? (
         <EmptyState
           icon={<Cpu size={32} />}

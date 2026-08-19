@@ -35,6 +35,10 @@ while true; do
     if ! cmp -s "$CRT" "$DEST/mqtt.crt" || ! cmp -s "$KEY" "$DEST/mqtt.key"; then
       cp "$CRT" "$DEST/mqtt.crt"
       cp "$KEY" "$DEST/mqtt.key"
+      # This container runs as root; EMQX does not. Without the chown the key
+      # lands root:root 0640 and the broker cannot open it, so the 8883 listener
+      # silently never starts. 1000:1000 is the emqx user in emqx/emqx:5.8.4.
+      chown 1000:1000 "$DEST/mqtt.crt" "$DEST/mqtt.key"
       chmod 644 "$DEST/mqtt.crt"
       chmod 640 "$DEST/mqtt.key"
       echo "[certsync] installed a new certificate for ${DOMAIN} — restart emqx to load it"

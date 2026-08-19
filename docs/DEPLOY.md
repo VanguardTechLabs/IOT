@@ -16,13 +16,18 @@ git clone <repo> /opt/pulse && cd /opt/pulse
 cp .env.example .env
 ```
 
-Set these four in `.env` before anything else — the stack refuses to start without
-them, deliberately, so a deployment can never end up with default secrets:
+Set these four in `.env` before anything else. They ship **empty** in
+`.env.example` and Compose declares them `${VAR:?}`, so the stack refuses to start
+until you fill them in — a deployment cannot end up on a default secret.
+
+`tr '+/' '-_'` is not cosmetic: these values are passed to Postgres and to the
+broker verbatim, and stripping the two URL-reserved characters keeps them safe to
+paste anywhere, including a `DATABASE_URL` if you ever run the services on the host.
 
 ```bash
-POSTGRES_PASSWORD=$(openssl rand -base64 24)
-MQTT_BACKEND_PASSWORD=$(openssl rand -base64 24)
-JWT_SECRET=$(openssl rand -base64 48)
+POSTGRES_PASSWORD=$(openssl rand -base64 24 | tr '+/' '-_')
+MQTT_BACKEND_PASSWORD=$(openssl rand -base64 24 | tr '+/' '-_')
+JWT_SECRET=$(openssl rand -base64 48 | tr '+/' '-_')
 EMQX_DASHBOARD_PASSWORD=<at least 8 characters>
 ```
 
@@ -69,7 +74,14 @@ ACME_EMAIL=you@example.com
 COOKIE_SECURE=true                      # required once the panel is on https
 PUBLIC_MQTT_HOST=mqtt.example.com
 PUBLIC_MQTT_PORT=8883
+CADDY_HTTP_PORT=80                      # see below — required for HTTP-01 and for
+CADDY_HTTPS_PORT=443                    # the firewall rules in section 4
 ```
+
+> Until `CADDY_HTTP_PORT=80` is set, Compose publishes the panel on **:8080**, and
+> Let's Encrypt's HTTP-01 challenge — which always connects to port 80 — cannot
+> reach Caddy. Set it before running the commands below, or no certificate is ever
+> issued and the `ufw` rules in section 4 guard a port nothing is listening on.
 
 ```bash
 docker compose up -d
@@ -170,4 +182,4 @@ drops a column, so an older image runs against a newer schema.
 | Login works, then every request 401s | `COOKIE_SECURE=true` while the panel is served over plain HTTP |
 | Broker rejects a device with `not_authorized` | Device disabled in the admin panel, or its token was rotated and the firmware still has the old one |
 | Charts empty beyond a few hours | Continuous aggregates never materialised — check `docker compose logs postgres` for background worker errors |
-| `/health` shows `dropped` climbing | Postgres cannot keep up; check disk I/O and confirm the compression policy is running |
+| `docker compose logs ingest` shows `dropped` climbing | Postgres cannot keep up; check disk I/O and confirm the compression policy is running. **Use the ingest logs, not `/health`** — `/health` reports the API's own writer, which only sees the HTTP and WebSocket paths, never MQTT |

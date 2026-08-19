@@ -3,6 +3,9 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
+    // Inside outDir so a deleted dist can never leave a stale "up to date" record
+    // behind — see packages/core/tsconfig.json for the full explanation.
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
     "types": ["node"]
   },
   "include": ["src/**/*.ts"]

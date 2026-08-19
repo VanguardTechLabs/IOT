@@ -1,61 +1,60 @@
 # Delivery runbook
 
-Work through this in order. Steps 1–2 are contractual and time-critical; 3–6 must
-happen before anything touches Edwin's server; 7–9 are the delivery itself.
+Steps 1–2 record where the contract actually stands and what is still owed by the
+client. Steps 3–6 must happen before anything touches Edwin's server; 7–9 are the
+delivery itself.
+
+*Last reviewed: 2026-08-19.*
 
 ---
 
-## 1. Extend the Workana deadline  ⏰ do this first
+## 1. Contract status  ✅ nothing outstanding
 
-The accepted bid records **3 days from 2026-08-01 19:59**, which expires
-**2026-08-04 ~19:59**. In chat you said *"aproximadamente una semana"* — that is not
-what the platform enforces.
+| Item | State |
+|---|---|
+| Bid accepted | 2026-08-01 19:59 — USD 60.00, held in escrow |
+| Original deadline | 2026-08-04 (the platform recorded 3 days; never realistic) |
+| Extension 1 | requested → **approved** → 2026-08-16 12:20 |
+| Extension 2 | requested → **approved** → **2026-08-24 15:39** ← current |
+| Scope | confirmed in writing by Edwin |
+| Open questions | none — email verification dropped, time zone is per device |
 
-1. Open the contract on Workana → request a delivery-date change to **2026-08-12**.
-2. Send Edwin the message in step 2 so the request has written context.
-
-Do not skip this because the code is finished. The remaining time depends on when
-his server appears, which is outside your control — that is exactly what a formal
-extension exists for.
+The deadline has already been extended twice and both were approved. **Do not ask
+for a third unless the server genuinely slips past 2026-08-24** — at that point send
+a status update instead, because two extensions is the limit of what still reads as
+professional on a USD 60 contract.
 
 ---
 
-## 2. Message Edwin
+## 2. What is still blocking delivery
 
-Both open questions are answered and he has approved the scope, so the only thing
-still blocking delivery is the server. Copy-paste:
+The code is finished: it builds, typechecks and passes its test suite. Exactly one
+thing stands between here and handover — **a server to put it on.**
 
-> Hola Edwin,
->
-> Perfecto, con eso queda todo definido.
->
-> - **Verificación de correo:** no se implementa. La cuenta queda activa de inmediato al registrarse.
-> - **Zona horaria:** ya quedó implementada tal como la pediste, como una opción en la configuración de cada dispositivo. Los datos se guardan siempre en UTC y cada dispositivo tiene su propia zona horaria, que se usa para sus gráficos y para su descarga en CSV. Así puedes tener dispositivos en distintas ciudades dentro de la misma cuenta y cada uno muestra su hora local. El CSV incluye las dos columnas, hora UTC y hora local, para que sirva en cualquier caso.
-> - **Alcance:** confirmado, sigo con eso.
->
-> **Sobre el servidor,** mi recomendación por precio y por espacio en disco:
->
-> **1. Contabo — la mejor relación precio/almacenamiento.** contabo.com → Cloud VPS. El plan más económico ya alcanza de sobra: 4 vCPU, 8 GB de RAM y 200 GB NVMe por alrededor de 6 a 9 USD al mes. Tienen un cargo único de instalación en algunos planes. Elige la ubicación **US East** o la más cercana a ti; para este proyecto la latencia no importa, porque los dispositivos envían cada 3 a 10 segundos.
->
-> **2. Hetzner — mejor hardware, algo menos de disco.** hetzner.com/cloud → plan CX32: 4 vCPU, 8 GB de RAM, 80 GB SSD, alrededor de 7 EUR al mes. Es más rápido, pero 80 GB es más justo si más adelante quieres guardar más de 30 días de historial. Piden verificación de identidad al abrir la cuenta.
->
-> **3. Vultr o DigitalOcean.** Panel más sencillo y tienen servidores en São Paulo, pero cuestan aproximadamente el doble o el triple por las mismas características. Solo los recomendaría si prefieres pagar más por comodidad.
->
-> **Mi recomendación concreta: Contabo, plan de 8 GB de RAM con 200 GB NVMe, con Ubuntu 24.04.** Con 100 dispositivos enviando cada 10 segundos, el historial de 30 días ocupa unos 3 GB gracias a la compresión automática, así que ese disco te deja crecer mucho antes de necesitar otro servidor.
->
-> **Cuando lo tengas, envíame:**
-> 1. La **IP** del servidor y la **contraseña de root**.
-> 2. El **dominio o subdominio** que vas a usar, con acceso al panel de DNS. Si lo tienes en Cloudflare, el subdominio para MQTT debe quedar en **"DNS only" (nube gris)**, porque Cloudflare no transporta tráfico MQTT y los dispositivos no podrían conectarse.
->
-> Con eso instalo la plataforma, configuro el certificado SSL y te entrego todo funcionando junto con el código de ejemplo para el ESP32.
->
-> Saludos
+### Already settled
 
-### About the deadline
+- Scope confirmed by Edwin in writing.
+- Both open questions answered: no email verification, time zone chosen per device.
+- Server recommendation sent (Contabo, 8 GB RAM / 200 GB NVMe, Ubuntu 24.04).
+- Edwin has opened a Contabo account and asked which region to choose — answered:
+  the one closest to him.
 
-If he has not yet responded to the extension request, add one line:
+### Still owed by Edwin
 
-> Sobre el plazo: en Workana quedó registrado con 3 días, pero como conversamos la primera versión toma alrededor de una semana. Ya solicité la ampliación en la plataforma; el desarrollo está terminado y lo que resta depende de cuándo tengamos el servidor.
+1. **The VPS IP and root password**, once the instance finishes provisioning.
+2. **A domain or subdomain**, with access to its DNS panel. If it is on Cloudflare,
+   the MQTT subdomain must be **DNS only (grey cloud)** — see step 7.
+
+Until both arrive, steps 3–6 are the useful work: boot the whole stack locally and
+find the problems here rather than on his machine.
+
+> ### ⚠️ Credential hygiene
+>
+> Edwin has pasted account passwords directly into the Workana chat. **Never copy
+> them into this repository, into `.env`, into a commit message or into an issue.**
+> This repo has a GitHub remote — anything committed is published. Keep them in a
+> password manager, use them only over SSH, and tell him to rotate every password he
+> typed into chat once handover is complete.
 
 ---
 
@@ -82,10 +81,26 @@ Both must print without error before continuing.
 typechecked, but the containers have never run together. Find the problems here,
 not on Edwin's server.
 
+> ### ⚠️ Status: not yet performed
+>
+> As of 2026-08-19 this step has **not** been run — the development machine has no
+> Docker and installing it needs elevation plus two reboots. The decision was to
+> verify on the server instead, which means **the first time these containers ever
+> run together will be on Edwin's VPS.**
+>
+> That is a real risk, not a formality. Build, typecheck and the 24 tests all pass,
+> but they exercise pure logic — no test starts Postgres, EMQX or Caddy. If you get
+> access to any machine with Docker before deploying, run this section there first;
+> it costs ten minutes and it is the difference between debugging on your box and
+> debugging on the client's.
+>
+> If you go straight to the server, work through **step 8's first-boot checklist**,
+> which covers exactly what this step would have caught.
+
 ### 4.1 Configure
 
 ```powershell
-cd g:\IoT
+cd c:\Users\Administrator\Documents\IOT
 Copy-Item .env.example .env
 ```
 
@@ -118,7 +133,7 @@ docker compose ps
 ```powershell
 docker compose logs api --tail=40
 ```
-**Expected:** migration lines for `0001`…`0004`, then `database up to date`, then
+**Expected:** migration lines for `0001`…`0006`, then `database up to date`, then
 `api listening`.
 **If it fails:** read the migration error. A TimescaleDB failure on `0002`/`0003`
 means the extension did not load — check `docker compose logs postgres`.
@@ -184,11 +199,16 @@ rate: 10.0 msg/s, failed: 0`.
 Let it run **30 minutes**, then:
 
 ```powershell
-curl http://localhost:8080/health
+docker compose logs ingest --tail=5
 ```
 
-**Expected:** `dropped: 0` and `written` around 270,000. Any non-zero `dropped`
-means Postgres could not keep up — tell me the number and the `ingest` logs.
+**Expected:** `dropped: 0` and `written` around **162,000** (100 devices x 9
+variables x 180 cycles). Any non-zero `dropped` means Postgres could not keep up —
+tell me the number and the `ingest` logs.
+
+> Do **not** use `/health` here. It reports the API process's writer, which only
+> ever sees HTTP and WebSocket uplinks — the simulator speaks MQTT, so `/health`
+> would show `written: 0` no matter how well the run went.
 
 Then in the browser: open one simulated device, switch the chart to **1h** and
 **24h**, and confirm both render. Click **Export CSV** and open the file.
@@ -207,20 +227,21 @@ Edwin's server is an evening.
 
 ---
 
-## 5. Put it under version control
+## 5. Version control  ✅ already done
 
-```powershell
-cd g:\IoT
-git init
-git add .
-git commit -m "Pulse IoT platform - first version"
+Initialised, committed and pushed:
+
+```
+origin   https://github.com/VanguardTechLabs/IOT.git
+branch   main
 ```
 
-`.gitignore` already excludes `node_modules`, `dist` and `.env`. Confirm `.env` is
-**not** in `git status` before you push anywhere.
+`.gitignore` excludes `node_modules`, `dist`, `.env` and `*.tsbuildinfo`. Before every
+push, confirm `.env` is **not** listed in `git status` — it carries the JWT secret and
+both database passwords.
 
-Create a private repo (GitHub/GitLab) and push. You will need it to `git clone` onto
-Edwin's server, and it is how you hand over the source.
+Step 7 clones this repo onto Edwin's server, and repository access is part of the
+handover in step 9.
 
 ---
 
@@ -274,12 +295,37 @@ Firewall: `ufw allow 22,80,443,1883,8883/tcp`. Do **not** open 18083 or 5432.
 
 ## 8. Verify on his server
 
+### 8.1 First-boot checklist
+
+Because step 4 was never run locally, this is the first time the stack has started
+anywhere. Check these in order — each one is a specific failure that was fixed but
+never observed running, so this is where they get confirmed.
+
 ```bash
-curl -s https://pulse.<domain>/health
+docker compose ps                      # every service up; none restarting
+```
+
+| # | Check | Expected | If it fails |
+|---|---|---|---|
+| 1 | `docker compose logs api --tail=40` | migrations `0001`…`0006`, then `api listening` | a `dist/server.js` MODULE_NOT_FOUND means a stale build context — `docker compose build --no-cache api` |
+| 2 | `docker compose exec api node -e "require('pg')"` + API logs | no `Set DATABASE_URL, or PGHOST/...` error | the discrete `PG*` variables did not reach the container |
+| 3 | `docker compose logs postgres | grep -i "continuous aggregate"` | no errors; migration 0006 applied | TimescaleDB extension did not load |
+| 4 | `ss -lntp | grep -E "5432|18083"` on the host | both bound to **127.0.0.1 only** | the loopback bind did not take effect — do not proceed until it has |
+| 5 | `docker compose logs certsync` then `docker compose exec emqx ls -l /opt/emqx/etc/certs` | `mqtt.key` owned by uid 1000 | EMQX cannot read the key and 8883 will not open |
+| 6 | `docker compose logs emqx | grep -i ssl` after `docker compose restart emqx` | the 8883 listener starts | see 5 |
+| 7 | Panel → change a device's interval | the device receives `{"interval":"..."}` on `d/<key>/dn` | check the retained publish in the api logs |
+| 8 | Panel → a 24 h and a 30 d chart | both plot the **whole** range, right up to now | rollup re-bucketing or real-time aggregation |
+
+### 8.2 Load check
+
+```bash
 docker compose logs ingest --tail=20
 docker compose exec api node apps/simulator/dist/provision.js --devices 5
 docker compose exec api node apps/simulator/dist/run.js --devices 5 --interval 10
 ```
+
+Read `written`/`dropped` from `docker compose logs ingest`, **not** from `/health` —
+`/health` only covers the API's own HTTP and WebSocket ingest, never MQTT.
 
 Watch the live panel, then **delete the five test devices from the admin panel**
 before handover. Do not leave test data in his production system.

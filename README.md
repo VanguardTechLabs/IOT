@@ -16,7 +16,8 @@ ESP32 ──MQTT/HTTP/WS──▶ EMQX ──▶ Ingest worker ──┬──�
 
 ```bash
 cp .env.example .env
-#  edit .env: POSTGRES_PASSWORD, MQTT_BACKEND_PASSWORD, JWT_SECRET
+#  edit .env: POSTGRES_PASSWORD, MQTT_BACKEND_PASSWORD, JWT_SECRET, EMQX_DASHBOARD_PASSWORD
+#  they ship empty and the stack refuses to start until they are set
 
 docker compose up -d --build
 ```
@@ -44,7 +45,7 @@ docker compose exec api node packages/core/dist/db/seed.js
 ### Tests
 
 ```bash
-pnpm test     # 22 assertions over the wire contract, credentials and query routing
+pnpm test     # 24 assertions over the wire contract, credentials, ingest loop and query routing
 ```
 
 These cover the rules the firmware, the simulator, EMQX and the CSV export all
@@ -59,6 +60,18 @@ pnpm install
 pnpm infra:up          # postgres + redis + emqx only
 pnpm build:core
 pnpm dev               # api :4000, ingest worker, web :5173
+```
+
+`pnpm dev` runs api and ingest **on the host**, not in Compose, so nothing loads
+`.env` for them and the hostnames in it (`postgres`, `redis`, `emqx`) only resolve
+inside the Docker network. Export the host-facing equivalents first:
+
+```bash
+export DATABASE_URL=postgres://pulse:<POSTGRES_PASSWORD>@localhost:5432/pulse
+export REDIS_URL=redis://localhost:6379
+export MQTT_URL=mqtt://localhost:1883
+export MQTT_BACKEND_PASSWORD=<same value as .env>
+export JWT_SECRET=<same value as .env>
 ```
 
 ---
@@ -143,8 +156,13 @@ ceiling — a load test that has to respect a 2-device limit cannot prove the pl
 holds 100. It writes `simulated-devices.json`, which `run.js` then drives over MQTT
 with jittered start times so the broker sees a steady rate rather than a herd.
 
-The worker logs throughput every 10 s; `GET /health` reports buffered, written and
-dropped row counts.
+The simulator logs its own publish rate every 10 s, and the ingest worker logs
+`buffered / written / dropped` every 60 s — `docker compose logs ingest` is the
+number that matters for a load test.
+
+`GET /health` reports the same three counters for **the API process only**, which
+covers the HTTP and WebSocket ingest paths. MQTT telemetry is written by the ingest
+worker in a separate container, so it never appears there.
 
 ---
 

@@ -33,6 +33,7 @@ const TTL_MS = 60_000;
  * those messages would run a fresh lookup against Postgres.
  */
 const MISS_TTL_MS = 10_000;
+const MAX_MISSES = 5_000;
 
 /**
  * Per-process device/variable cache. Ingest resolves a device on every message, so
@@ -96,6 +97,14 @@ export class DeviceRegistry {
 
     const row = rows[0];
     if (!row) {
+      // Device keys reaching this path are unauthenticated and attacker-supplied,
+      // so the negative cache needs a ceiling: expire what is already stale, and
+      // if that frees nothing, drop the lot rather than grow without bound.
+      if (this.misses.size >= MAX_MISSES) {
+        const now = Date.now();
+        for (const [k, t] of this.misses) if (now - t >= MISS_TTL_MS) this.misses.delete(k);
+        if (this.misses.size >= MAX_MISSES) this.misses.clear();
+      }
       this.misses.set(deviceKey, Date.now());
       return null;
     }

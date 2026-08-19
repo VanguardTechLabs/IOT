@@ -52,7 +52,11 @@ export class TelemetryWriter {
       this.droppedRows += Math.floor(this.maxBuffer / 10);
     }
     this.rows.push(row);
-    this.latest.set(row.variableId, row);
+    // Newest-wins, matching the `variable_state.ts <= EXCLUDED.ts` guard in write().
+    // Keeping the last row to *arrive* would let a delayed packet overwrite a newer
+    // reading inside the same batch, where the SQL guard can no longer see it.
+    const prev = this.latest.get(row.variableId);
+    if (!prev || row.ts.getTime() >= prev.ts.getTime()) this.latest.set(row.variableId, row);
     this.schedule();
   }
 
@@ -71,7 +75,12 @@ export class TelemetryWriter {
 
   private schedule(): void {
     if (this.stopped) return;
-    if (this.rows.length >= this.flushRows) {
+    // `!this.flushing` is load-bearing, not an optimisation. flush() returns early
+    // while a write is in flight and calls schedule() on its way out; without this
+    // guard the two recurse synchronously — no await separates them — and a write
+    // slower than (flushRows / ingest rate) blows the stack and kills the process.
+    // The .finally() below re-arms the flush as soon as the in-flight write lands.
+    if (!this.flushing && this.rows.length >= this.flushRows) {
       void this.flush();
       return;
     }

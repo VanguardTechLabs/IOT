@@ -2,7 +2,12 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    // Kept inside outDir on purpose. With `incremental`, tsc trusts this file and
+    // skips emitting when it says the inputs are unchanged — it never checks that
+    // the output is still there. Left at the project root it outlives `rm -rf dist`
+    // and the next build silently produces nothing.
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
   },
   "include": ["src/**/*.ts"]
 }

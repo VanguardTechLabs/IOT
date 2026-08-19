@@ -110,13 +110,22 @@ export async function querySeries(opts: {
   }
 
   const view = resolution === '1m' ? 'telemetry_1m' : 'telemetry_1h';
+  // Re-bucket rather than LIMIT. A bare `ORDER BY bucket LIMIT n` returns the
+  // OLDEST n buckets, so a 24 h window (1440 one-minute buckets, maxPoints 600)
+  // used to stop plotting ~10 h in, and a 30-day window silently dropped its
+  // newest days. Widening the bucket keeps the whole range and honours maxPoints.
+  const viewBucketMs = resolution === '1m' ? 60_000 : 3_600_000;
+  const rollupBucketMs = Math.max(viewBucketMs, Math.floor((toMs - fromMs) / maxPoints));
   const { rows } = await pool.query<{ t: Date; v: number | null; mn: number | null; mx: number | null }>(
-    `SELECT bucket AS t, avg_value AS v, min_value AS mn, max_value AS mx
+    `SELECT time_bucket(make_interval(secs => $4::double precision / 1000), bucket) AS t,
+            avg(avg_value) AS v,
+            min(min_value) AS mn,
+            max(max_value) AS mx
        FROM ${view}
       WHERE variable_id = $1 AND bucket >= $2 AND bucket <= $3
-      ORDER BY bucket
-      LIMIT $4`,
-    [variableId, from, to, maxPoints],
+      GROUP BY 1
+      ORDER BY 1`,
+    [variableId, from, to, rollupBucketMs],
   );
   return {
     resolution,
