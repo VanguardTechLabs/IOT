@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────────────────────
+# Shared build for every Node service (api, ingest, simulator).
+# One image, one dependency graph, one build cache — the entrypoint decides
+# which service runs.
+# ─────────────────────────────────────────────────────────────
+FROM node:22-alpine AS base
+RUN corepack enable && apk add --no-cache tini
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY packages/core/package.json packages/core/
+COPY apps/api/package.json apps/api/
+COPY apps/ingest/package.json apps/ingest/
+COPY apps/simulator/package.json apps/simulator/
+# apps/web is listed in the lockfile, so its manifest has to be present for a
+# frozen install even though this image never builds it.
+COPY apps/web/package.json apps/web/
+RUN pnpm install --frozen-lockfile --filter "!@pulse/web"
+
+FROM deps AS build
+COPY tsconfig.base.json ./
+COPY packages ./packages
+COPY apps/api ./apps/api
+COPY apps/ingest ./apps/ingest
+COPY apps/simulator ./apps/simulator
+RUN pnpm --filter @pulse/core build \
+ && pnpm --filter @pulse/api build \
+ && pnpm --filter @pulse/ingest build \
+ && pnpm --filter @pulse/simulator build
+
+FROM base AS runtime
+ENV NODE_ENV=production
+COPY --from=build /app /app
+# The simulator writes simulated-devices.json into the working directory, so the
+# unprivileged runtime user has to own it. Without this, `provision.js` fails with
+# EACCES the first time anyone runs a load test.
+RUN chown -R node:node /app
+USER node
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "apps/api/dist/server.js"]

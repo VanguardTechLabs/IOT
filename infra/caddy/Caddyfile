@@ -1,0 +1,65 @@
+# ─────────────────────────────────────────────────────────────
+# Pulse IoT — single-origin reverse proxy.
+#
+# Serving the SPA and the API from one origin is what makes the httpOnly refresh
+# cookie work without any CORS exceptions.
+#
+# TLS is driven entirely by .env — no edits to this file are needed:
+#   SITE_ADDRESS=:80                 → plain HTTP (local / behind another proxy)
+#   SITE_ADDRESS=pulse.example.com   → Caddy provisions and renews a certificate
+#
+# MQTT_DOMAIN adds a second site whose only job is to make Caddy obtain a
+# certificate for the MQTT hostname. Caddy cannot proxy MQTT itself, so the
+# certsync sidecar copies that certificate over to EMQX, which terminates TLS on
+# 8883 directly.
+# ─────────────────────────────────────────────────────────────
+
+{
+	email {$ACME_EMAIL:admin@localhost}
+	admin off
+}
+
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	# Device uplink + REST + realtime all live under the API service.
+	handle /api/* {
+		reverse_proxy api:4000
+	}
+
+	handle /socket.io/* {
+		reverse_proxy api:4000
+	}
+
+	handle /health {
+		reverse_proxy api:4000
+	}
+
+	# Hashed assets are immutable; index.html must never be cached or a deploy
+	# leaves clients on a stale bundle.
+	handle /assets/* {
+		header Cache-Control "public, max-age=31536000, immutable"
+		root * /srv
+		file_server
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		header /index.html Cache-Control "no-cache"
+		file_server
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}
+
+# Certificate-only site for the MQTT hostname. Defaults to an unexposed internal
+# port so the block is inert until MQTT_DOMAIN is set.
+{$MQTT_SITE_ADDRESS::8081} {
+	respond "pulse-mqtt" 200
+}

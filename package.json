@@ -1,0 +1,36 @@
+{
+  "name": "pulse-iot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.6.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r --sequential build",
+    "build:core": "pnpm --filter @pulse/core build",
+    "dev": "pnpm build:core && pnpm -r --parallel dev",
+    "typecheck": "pnpm -r --sequential typecheck",
+    "test": "pnpm build:core && node --test \"test/*.test.mjs\"",
+    "migrate": "pnpm --filter @pulse/core migrate",
+    "seed": "pnpm --filter @pulse/core seed",
+    "sim": "pnpm --filter @pulse/simulator start",
+    "sim:provision": "pnpm --filter @pulse/simulator provision",
+    "infra:up": "docker compose up -d postgres redis emqx",
+    "infra:down": "docker compose down",
+    "up": "docker compose up -d --build",
+    "down": "docker compose down",
+    "logs": "docker compose logs -f api ingest",
+    "clean": "pnpm -r exec rm -rf dist node_modules && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@pulse/core": "workspace:*",
+    "@types/node": "^22.13.9",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "@node-rs/argon2"]
+  }
+}

@@ -1,0 +1,174 @@
+name: pulse
+
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-pulse}
+      TIMESCALEDB_TELEMETRY: "off"
+    command:
+      # Telemetry is write-heavy and read-recent: a large shared_buffers plus a
+      # generous WAL keeps the batch inserts from stalling on checkpoints.
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1536MB
+      - -c
+      - max_wal_size=2GB
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - synchronous_commit=off
+      - -c
+      - timescaledb.max_background_workers=8
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pulse} -d ${POSTGRES_DB:-pulse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  emqx:
+    image: emqx/emqx:5.8.4
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # emqx.conf cannot read env vars (see the note in that file), so the
+      # deployment-specific fields come in through EMQX's own override mechanism.
+      EMQX_AUTHENTICATION__1__SERVER: postgres:5432
+      EMQX_AUTHENTICATION__1__DATABASE: ${POSTGRES_DB:-pulse}
+      EMQX_AUTHENTICATION__1__USERNAME: ${POSTGRES_USER:-pulse}
+      EMQX_AUTHENTICATION__1__PASSWORD: ${POSTGRES_PASSWORD}
+      EMQX_AUTHORIZATION__SOURCES__1__SERVER: postgres:5432
+      EMQX_AUTHORIZATION__SOURCES__1__DATABASE: ${POSTGRES_DB:-pulse}
+      EMQX_AUTHORIZATION__SOURCES__1__USERNAME: ${POSTGRES_USER:-pulse}
+      EMQX_AUTHORIZATION__SOURCES__1__PASSWORD: ${POSTGRES_PASSWORD}
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:-pulseadmin}
+      # TLS on 8883, fed by the certsync sidecar. Inert until MQTT_TLS_ENABLED=true.
+      EMQX_LISTENERS__SSL__DEFAULT__ENABLE: ${MQTT_TLS_ENABLED:-false}
+      EMQX_LISTENERS__SSL__DEFAULT__BIND: "0.0.0.0:8883"
+      EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__CERTFILE: /opt/emqx/etc/certs/mqtt.crt
+      EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__KEYFILE: /opt/emqx/etc/certs/mqtt.key
+    volumes:
+      - ./infra/emqx/emqx.conf:/opt/emqx/etc/emqx.conf:ro
+      - emqxdata:/opt/emqx/data
+      - emqxcerts:/opt/emqx/etc/certs
+    ports:
+      - "${EMQX_TCP_PORT:-1883}:1883"
+      - "${EMQX_WS_PORT:-8083}:8083"
+      - "${EMQX_TLS_PORT:-8883}:8883"
+      - "${EMQX_DASHBOARD_PORT:-18083}:18083"
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    restart: unless-stopped
+    command: ["node", "apps/api/dist/server.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: &node_env
+      NODE_ENV: production
+      SERVICE_NAME: pulse
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-pulse}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-pulse}
+      REDIS_URL: redis://redis:6379
+      MQTT_URL: mqtt://emqx:1883
+      MQTT_BACKEND_USER: ${MQTT_BACKEND_USER:-pulse-backend}
+      MQTT_BACKEND_PASSWORD: ${MQTT_BACKEND_PASSWORD:?set MQTT_BACKEND_PASSWORD in .env}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+      PUBLIC_MQTT_HOST: ${PUBLIC_MQTT_HOST:-localhost}
+      PUBLIC_MQTT_PORT: ${PUBLIC_MQTT_PORT:-1883}
+      PUBLIC_MQTT_WS_PORT: ${PUBLIC_MQTT_WS_PORT:-8083}
+      API_PORT: 4000
+      INGEST_FLUSH_MS: ${INGEST_FLUSH_MS:-200}
+      INGEST_FLUSH_ROWS: ${INGEST_FLUSH_ROWS:-500}
+      INGEST_BURST_LIMIT: ${INGEST_BURST_LIMIT:-30}
+      INGEST_BURST_WINDOW_S: ${INGEST_BURST_WINDOW_S:-3}
+      TELEMETRY_RETENTION_DAYS: ${TELEMETRY_RETENTION_DAYS:-30}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    restart: unless-stopped
+    command: ["node", "apps/ingest/dist/index.js"]
+    depends_on:
+      api:
+        condition: service_started
+      emqx:
+        condition: service_healthy
+    environment: *node_env
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      # ":80" keeps Caddy on plain HTTP; a bare hostname makes it provision TLS.
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      MQTT_SITE_ADDRESS: ${MQTT_SITE_ADDRESS:-:8081}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@localhost}
+    volumes:
+      - caddydata:/data
+    ports:
+      - "${CADDY_HTTP_PORT:-8080}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+
+  # Hands EMQX the certificate Caddy already manages. Idles when MQTT_DOMAIN is unset.
+  certsync:
+    image: alpine:3.20
+    restart: unless-stopped
+    depends_on:
+      - web
+    environment:
+      MQTT_DOMAIN: ${MQTT_DOMAIN:-}
+    entrypoint: ["/bin/sh", "/sync.sh"]
+    volumes:
+      - ./infra/certsync/sync.sh:/sync.sh:ro
+      - caddydata:/caddy-data:ro
+      - emqxcerts:/emqx-certs
+
+volumes:
+  pgdata:
+  emqxdata:
+  emqxcerts:
+  caddydata:

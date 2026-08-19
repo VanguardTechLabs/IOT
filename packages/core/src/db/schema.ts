@@ -1,0 +1,224 @@
+import {
+  bigint,
+  boolean,
+  doublePrecision,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
+
+/** Subscription plans. The free tier is seeded by migration 0001. */
+export const plans = pgTable('plans', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  maxDevices: integer('max_devices').notNull(),
+  maxVariablesPerDevice: integer('max_variables_per_device').notNull(),
+  retentionDays: integer('retention_days').notNull(),
+  minIntervalS: integer('min_interval_s').notNull(),
+  priceCents: integer('price_cents').notNull().default(0),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    email: text('email').notNull(),
+    name: text('name').notNull(),
+    passwordHash: text('password_hash').notNull(),
+    planId: text('plan_id')
+      .notNull()
+      .default('free')
+      .references(() => plans.id),
+    role: text('role').notNull().default('user'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('users_email_lower_idx').on(t.email)],
+);
+
+export const refreshTokens = pgTable(
+  'refresh_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    userAgent: text('user_agent'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('refresh_tokens_hash_idx').on(t.tokenHash),
+    index('refresh_tokens_user_idx').on(t.userId),
+  ],
+);
+
+/** A physical ESP32 (or any MQTT/HTTP/WS client). */
+export const devices = pgTable(
+  'devices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    deviceKey: text('device_key').notNull(),
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    /** sha256(token + salt), hex — validated identically by EMQX and by the HTTP/WS ingest paths. */
+    tokenHash: text('token_hash').notNull(),
+    tokenSalt: text('token_salt').notNull(),
+    tokenPreview: text('token_preview').notNull().default(''),
+    intervalS: integer('interval_s').notNull().default(10),
+    /** IANA zone used to label this device's charts and CSV export. Storage stays UTC. */
+    timezone: text('timezone').notNull().default('UTC'),
+    enabled: boolean('enabled').notNull().default(true),
+    autoCreateVariables: boolean('auto_create_variables').notNull().default(true),
+    online: boolean('online').notNull().default(false),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    lastTransport: text('last_transport'),
+    messageCount: bigint('message_count', { mode: 'number' }).notNull().default(0),
+    pointCount: bigint('point_count', { mode: 'number' }).notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('devices_key_idx').on(t.deviceKey),
+    index('devices_user_idx').on(t.userId),
+  ],
+);
+
+/** One variable = one telemetry channel of one device. Types are declared here; the wire format is always string. */
+export const variables = pgTable(
+  'variables',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    deviceId: uuid('device_id')
+      .notNull()
+      .references(() => devices.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    label: text('label').notNull(),
+    /** 'int' | 'float' | 'bool' | 'string' */
+    type: text('type').notNull().default('float'),
+    unit: text('unit').notNull().default(''),
+    writable: boolean('writable').notNull().default(false),
+    color: text('color').notNull().default('#38bdf8'),
+    minValue: doublePrecision('min_value'),
+    maxValue: doublePrecision('max_value'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('variables_device_key_idx').on(t.deviceId, t.key),
+    index('variables_device_idx').on(t.deviceId),
+  ],
+);
+
+/** Hypertable. Numeric values (int/float/bool) go to value_num, text to value_text. */
+export const telemetry = pgTable(
+  'telemetry',
+  {
+    ts: timestamp('ts', { withTimezone: true }).notNull(),
+    variableId: uuid('variable_id').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    valueNum: doublePrecision('value_num'),
+    valueText: text('value_text'),
+  },
+  (t) => [index('telemetry_variable_ts_idx').on(t.variableId, t.ts)],
+);
+
+/** Last known value per variable — powers instant dashboard loads without touching the hypertable. */
+export const variableState = pgTable('variable_state', {
+  variableId: uuid('variable_id')
+    .primaryKey()
+    .references(() => variables.id, { onDelete: 'cascade' }),
+  deviceId: uuid('device_id').notNull(),
+  ts: timestamp('ts', { withTimezone: true }).notNull(),
+  valueNum: doublePrecision('value_num'),
+  valueText: text('value_text'),
+});
+
+/** Downlink command audit trail (panel → device). */
+export const commands = pgTable(
+  'commands',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    deviceId: uuid('device_id')
+      .notNull()
+      .references(() => devices.id, { onDelete: 'cascade' }),
+    variableId: uuid('variable_id').references(() => variables.id, { onDelete: 'set null' }),
+    key: text('key').notNull(),
+    value: text('value').notNull(),
+    issuedBy: uuid('issued_by').references(() => users.id, { onDelete: 'set null' }),
+    source: text('source').notNull().default('panel'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('commands_device_created_idx').on(t.deviceId, t.createdAt)],
+);
+
+/** Phase-2 alerting: schema is live so rules can be authored now and evaluated later. */
+export const alertRules = pgTable(
+  'alert_rules',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    variableId: uuid('variable_id')
+      .notNull()
+      .references(() => variables.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq' | 'offline' */
+    operator: text('operator').notNull(),
+    threshold: doublePrecision('threshold'),
+    forSeconds: integer('for_seconds').notNull().default(0),
+    channels: jsonb('channels').notNull().default([]),
+    enabled: boolean('enabled').notNull().default(true),
+    lastFiredAt: timestamp('last_fired_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('alert_rules_variable_idx').on(t.variableId)],
+);
+
+/** Machine-to-machine keys for third-party integrations. */
+export const apiKeys = pgTable(
+  'api_keys',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    keyHash: text('key_hash').notNull(),
+    keyPreview: text('key_preview').notNull(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('api_keys_hash_idx').on(t.keyHash), index('api_keys_user_idx').on(t.userId)],
+);
+
+/** Broker credentials for the API/ingest services (EMQX superusers). */
+export const serviceAccounts = pgTable('service_accounts', {
+  username: text('username').primaryKey(),
+  passwordHash: text('password_hash').notNull(),
+  salt: text('salt').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const migrationsTable = pgTable(
+  '_migrations',
+  {
+    name: text('name').notNull(),
+    appliedAt: timestamp('applied_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.name] })],
+);

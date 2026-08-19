@@ -1,0 +1,112 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-ink-950: #020617;
+  --color-ink-900: #0b1120;
+  --color-ink-850: #0f172a;
+  --color-ink-800: #16213a;
+  --color-ink-700: #1e293b;
+  --color-ink-600: #334155;
+  --color-mute: #94a3b8;
+  --color-accent: #22d3ee;
+  --color-accent-soft: #0e7490;
+  --font-sans: 'Inter var', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ink-950 text-slate-200 antialiased;
+    font-family: var(--font-sans);
+    background-image:
+      radial-gradient(60rem 40rem at 15% -10%, rgb(34 211 238 / 0.08), transparent 60%),
+      radial-gradient(50rem 35rem at 110% 10%, rgb(129 140 248 / 0.07), transparent 60%);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    @apply bg-cyan-400/30 text-white;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-ink-600) transparent;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-white/5 bg-ink-900/70 backdrop-blur-sm shadow-lg shadow-black/20;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-white/10 bg-ink-850/80 px-3 py-2 text-sm text-slate-100
+           placeholder:text-slate-500 outline-none transition
+           focus:border-cyan-400/60 focus:ring-2 focus:ring-cyan-400/20;
+  }
+
+  .label {
+    @apply mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400;
+  }
+
+  /* Tailwind v4 resolves @apply against real utilities only, so each variant
+     restates the base rather than composing `.btn`. */
+  .btn,
+  .btn-primary,
+  .btn-ghost,
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium
+           transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply bg-cyan-500 text-ink-950 hover:bg-cyan-400 active:bg-cyan-500;
+  }
+
+  .btn-ghost {
+    @apply border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10;
+  }
+
+  .btn-danger {
+    @apply border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgb(34 211 238 / 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgb(34 211 238 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(34 211 238 / 0);
+  }
+}
+
+.live-dot {
+  animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes value-flash {
+  from {
+    color: var(--color-accent);
+  }
+  to {
+    color: inherit;
+  }
+}
+
+.value-flash {
+  animation: value-flash 0.6s ease-out;
+}
