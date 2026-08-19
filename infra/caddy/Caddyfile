@@ -20,7 +20,18 @@
 }
 
 {$SITE_ADDRESS::80} {
-	encode zstd gzip
+	# Never compress a connection that is going to be upgraded. `encode` at site
+	# level also wraps the hijacked WebSocket stream, and gzip/zstd applied to
+	# WebSocket frames corrupts every frame after the handshake — the browser
+	# reports "Invalid frame header" and the live stream never connects, while the
+	# HTTP polling fallback keeps working, which makes it look like an auth or CORS
+	# problem when it is neither.
+	#
+	# Two endpoints upgrade here, and both were affected: /socket.io/* (the
+	# dashboard's realtime feed) and /api/v1/ingest/ws (the device WebSocket
+	# uplink, one of the three supported transports).
+	@compressible not path /socket.io/* /api/v1/ingest/ws
+	encode @compressible zstd gzip
 
 	# Device uplink + REST + realtime all live under the API service.
 	handle /api/* {
