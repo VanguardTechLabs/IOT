@@ -301,22 +301,50 @@ Because step 4 was never run locally, this is the first time the stack has start
 anywhere. Check these in order — each one is a specific failure that was fixed but
 never observed running, so this is where they get confirmed.
 
+Run everything from `/opt/pulse` — compose bind-mounts `./infra/emqx/emqx.conf` and
+`./infra/certsync/sync.sh` relatively, and from any other directory those become empty
+mounts and EMQX silently starts on its default config.
+
+Add `-T` to every `docker compose exec` when driving these over a non-interactive
+SSH command, or they fail with *the input device is not a TTY*.
+
 ```bash
+cd /opt/pulse
 docker compose ps                      # every service up; none restarting
 ```
 
 | # | Check | Expected | If it fails |
 |---|---|---|---|
-| 1 | `docker compose logs api --tail=40` | migrations `0001`…`0006`, then `api listening` | a `dist/server.js` MODULE_NOT_FOUND means a stale build context — `docker compose build --no-cache api` |
-| 2 | `docker compose exec api node -e "require('pg')"` + API logs | no `Set DATABASE_URL, or PGHOST/...` error | the discrete `PG*` variables did not reach the container |
-| 3 | `docker compose logs postgres | grep -i "continuous aggregate"` | no errors; migration 0006 applied | TimescaleDB extension did not load |
+| 1 | `docker compose logs api --tail=40` | `applying migration` ×6 then `api listening`. **Only on the very first boot** — later starts log just `database up to date` with `count:6`, which is equally good | a `dist/server.js` MODULE_NOT_FOUND means a stale build context — `docker compose build --no-cache api` |
+| 2 | `docker compose exec -T api printenv PGHOST PGPORT PGUSER PGDATABASE` | `postgres` / `5432` / `pulse` / `pulse` | the discrete `PG*` variables did not reach the container; `docker compose logs api | grep "Set DATABASE_URL"` confirms it |
+| 3 | `docker compose exec -T postgres psql -U pulse -d pulse -c "SELECT name FROM _migrations ORDER BY name;"` | all **six** migration filenames, including `0006_realtime_aggregates.sql` | migrations did not complete — read the api logs, not the postgres logs; the API runs them |
 | 4 | `ss -lntp | grep -E "5432|18083"` on the host | both bound to **127.0.0.1 only** | the loopback bind did not take effect — do not proceed until it has |
-| 5 | `docker compose logs certsync` then `docker compose exec emqx ls -l /opt/emqx/etc/certs` | `mqtt.key` owned by uid 1000 | EMQX cannot read the key and 8883 will not open |
-| 6 | `docker compose logs emqx | grep -i ssl` after `docker compose restart emqx` | the 8883 listener starts | see 5 |
-| 7 | Panel → change a device's interval | the device receives `{"interval":"..."}` on `d/<key>/dn` | check the retained publish in the api logs |
-| 8 | Panel → a 24 h and a 30 d chart | both plot the **whole** range, right up to now | rollup re-bucketing or real-time aggregation |
+| 5 | Panel → change a device's interval | the device receives `{"interval":"..."}` on `d/<key>/dn` | check the retained publish in the api logs |
+| 6 | Panel → a 24 h and a 30 d chart | both plot the **whole** range, right up to now | rollup re-bucketing or real-time aggregation |
+
+> **TLS rows deliberately absent.** Until Edwin supplies a domain, `MQTT_DOMAIN` is
+> empty and `MQTT_TLS_ENABLED=false`, so certsync idles and EMQX never opens 8883.
+> `docker compose exec emqx ls /opt/emqx/etc/certs` being **empty is correct**, and the
+> only expected certsync line is
+> `[certsync] MQTT_DOMAIN is not set — TLS for the broker is disabled, idling.`
+> Check the certificate rows only after the domain exists — otherwise you will spend
+> an evening debugging a listener that was never meant to start.
+
+> **First boot noise that is not a failure.** `emqx` only waits on `postgres`, so it
+> can accept connections before the API has created the `emqx_authn`/`emqx_acl` views
+> (migration 0004) and the `pulse-backend` service account. Expect a few
+> `broker error` / `not_authorized` lines in the ingest log; mqtt.js retries every 2 s
+> and it self-heals. Confirm with `docker compose logs ingest` showing `subscribed`
+> on `d/+/up`, `d/+/up/+`, `d/+/status`.
 
 ### 8.2 Load check
+
+> **Register your admin account in the panel BEFORE running anything below.** Both
+> `provision.js` and the seed insert users with the default role `user`, and
+> `/auth/register` only grants admin when the users table is *empty*. Run either one
+> first and the deployment ends up with **no administrator at all**, recoverable only
+> by hand-editing Postgres. Also: never run the seed on Edwin's server — it creates
+> `demo@pulse.io` with the password printed in the README.
 
 ```bash
 docker compose logs ingest --tail=20
