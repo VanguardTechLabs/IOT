@@ -196,7 +196,7 @@ apps/ingest          MQTT consumer, presence, offline sweeper
 apps/web             React 19 + Vite + Tailwind v4 dashboard
 apps/simulator       fleet provisioning and load generation
 firmware/esp32       reference Arduino sketch
-infra/               EMQX and Caddy configuration
+infra/               EMQX, Caddy and nginx configuration
 ```
 
 Migrations are plain SQL in `packages/core/migrations`, applied in order and recorded
@@ -260,6 +260,37 @@ adding it requires a migration to existing tables.
 **Billing.** The `plans` table carries prices and all three tiers, and every limit is
 enforced end to end today. Moving a user to a paid tier is a single field update — no
 schema change, no code change.
+
+---
+
+## Serving with nginx instead of Caddy
+
+Caddy is the default because it provisions and renews TLS unattended. If your
+deployment standardises on nginx, the same stack runs behind it:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.nginx.yml up -d --build
+```
+
+Only the `web` service changes; Postgres, Redis, EMQX, api and ingest are
+untouched, and `.env` behaves identically.
+
+What you take on by switching:
+
+| | Caddy (default) | nginx |
+|---|---|---|
+| HTTPS | automatic, renews itself | certbot + a renewal cron |
+| Broker certificate for `mqtts` | `certsync` copies Caddy's | manual |
+| WebSocket upgrades | implicit | four explicit directives |
+| Compression | zstd + gzip | gzip |
+
+That third row is the one that bites. nginx will not upgrade a WebSocket unless
+told to, and a missing `Upgrade`/`Connection` pair does not error — it quietly
+serves a normal response, the dashboard's live badge sticks on **Offline**, and
+device uplinks on `/api/v1/ingest/ws` fail the same way with nothing in the panel
+to explain it. [`infra/nginx/nginx.conf`](infra/nginx/nginx.conf) has it wired
+correctly; if you adapt that file, keep the `map $http_upgrade` block and the
+per-location headers together.
 
 ---
 

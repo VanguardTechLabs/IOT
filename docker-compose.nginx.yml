@@ -1,0 +1,35 @@
+# ─────────────────────────────────────────────────────────────
+# Serve the panel with nginx instead of Caddy.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.nginx.yml up -d --build
+#
+# Everything else — Postgres, Redis, EMQX, api, ingest — is untouched; only the
+# `web` service changes image. Ports and .env handling are inherited from the
+# base file, so PUBLIC_URL, CADDY_HTTP_PORT and friends keep working exactly as
+# documented.
+#
+# WHAT YOU GIVE UP by choosing this file:
+#   * Automatic HTTPS. Caddy provisions and renews on its own; nginx needs
+#     certbot plus a renewal cron. See the commented server block in
+#     infra/nginx/nginx.conf.
+#   * The certsync sidecar. It exists to copy Caddy's certificate to EMQX for
+#     mqtts on 8883; with no Caddy there is nothing to copy, so it idles and
+#     TLS for the broker has to be wired by hand.
+#   * zstd compression (gzip only).
+#
+# Unless your deployment standardises on nginx, prefer the default Caddy setup —
+# it is the one the TLS instructions in docs/DEPLOY.md are written against.
+# ─────────────────────────────────────────────────────────────
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile.nginx
+    environment:
+      # SITE_ADDRESS / MQTT_SITE_ADDRESS / ACME_EMAIL are Caddy-only and are
+      # ignored here; the server block in nginx.conf listens on :80 directly.
+      # Left declared so the two compose files stay diffable.
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      MQTT_SITE_ADDRESS: ${MQTT_SITE_ADDRESS:-:8081}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@localhost}

@@ -173,6 +173,32 @@ drops a column, so an older image runs against a newer schema.
 
 ---
 
+## Using nginx instead of Caddy
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.nginx.yml up -d --build
+```
+
+Sections 1, 2 and 4 above apply unchanged. **Section 3 (TLS) does not** — nginx
+has no ACME client, so replace it with certbot:
+
+```bash
+docker compose stop web
+docker run --rm -p 80:80 -v /etc/letsencrypt:/etc/letsencrypt   certbot/certbot certonly --standalone -d panel.example.com
+```
+
+Then mount `/etc/letsencrypt` into the web service, uncomment and complete the
+`listen 443 ssl` block in [`infra/nginx/nginx.conf`](../infra/nginx/nginx.conf),
+set `PUBLIC_URL=https://…` and `COOKIE_SECURE=true` in `.env`, and add a renewal
+cron. The `certsync` sidecar has nothing to do in this configuration, so the
+broker certificate for `mqtts` on 8883 must be placed in the `emqxcerts` volume
+by hand as `mqtt.crt` / `mqtt.key`, owned by uid 1000.
+
+This is roughly an hour of setup that Caddy does in one line, which is why Caddy
+is the default. Choose nginx only if something else in your estate requires it.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Cause |
@@ -182,4 +208,5 @@ drops a column, so an older image runs against a newer schema.
 | Login works, then every request 401s | `COOKIE_SECURE=true` while the panel is served over plain HTTP |
 | Broker rejects a device with `not_authorized` | Device disabled in the admin panel, or its token was rotated and the firmware still has the old one |
 | Charts empty beyond a few hours | Continuous aggregates never materialised — check `docker compose logs postgres` for background worker errors |
+| Live badge stuck on **Offline**, console shows `Invalid frame header` | A proxy in front is not upgrading WebSockets, or is compressing them. With nginx, check the `map $http_upgrade` block and the `Upgrade`/`Connection` headers in every proxied location |
 | `docker compose logs ingest` shows `dropped` climbing | Postgres cannot keep up; check disk I/O and confirm the compression policy is running. **Use the ingest logs, not `/health`** — `/health` reports the API's own writer, which only sees the HTTP and WebSocket paths, never MQTT |
