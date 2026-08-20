@@ -25,6 +25,21 @@ fi
 
 mkdir -p "$DEST"
 
+# Until the first certificate exists, poll fast.
+#
+# On a fresh deployment certsync and Caddy start together, and Caddy needs ~10 s
+# to complete the ACME order. The first pass therefore finds nothing — and with a
+# single 12 hour interval the broker's TLS listener then stayed dead for half a
+# day, with nothing in the panel to explain why devices could not connect over
+# mqtts. Observed on the first real deployment.
+#
+# Once a certificate has been installed, renewals are the only thing left to
+# watch for and the long interval is right.
+INITIAL_INTERVAL="${SYNC_INITIAL_INTERVAL:-15}"
+INITIAL_DEADLINE="${SYNC_INITIAL_DEADLINE:-900}"
+installed=0
+waited=0
+
 while true; do
   CRT="$(find "$SRC_ROOT" -type f -name "${DOMAIN}.crt" 2>/dev/null | head -n 1 || true)"
   KEY="$(find "$SRC_ROOT" -type f -name "${DOMAIN}.key" 2>/dev/null | head -n 1 || true)"
@@ -43,9 +58,21 @@ while true; do
       chmod 640 "$DEST/mqtt.key"
       echo "[certsync] installed a new certificate for ${DOMAIN} — restart emqx to load it"
     fi
+    installed=1
   else
-    echo "[certsync] no certificate for ${DOMAIN} yet; is its DNS record set to DNS-only (grey cloud)?"
+    # Only worth saying once a minute while we are polling every 15 s.
+    if [ "$installed" -eq 0 ] && [ $((waited % 60)) -eq 0 ]; then
+      echo "[certsync] no certificate for ${DOMAIN} yet; is its DNS record set to DNS-only (grey cloud)?"
+    fi
   fi
 
-  sleep "$INTERVAL"
+  # Fast polling only while waiting for the very first certificate, and only for
+  # a bounded window. After that, a missing certificate is a configuration
+  # problem rather than a startup race, and polling every 15 s helps nobody.
+  if [ "$installed" -eq 0 ] && [ "$waited" -lt "$INITIAL_DEADLINE" ]; then
+    waited=$((waited + INITIAL_INTERVAL))
+    sleep "$INITIAL_INTERVAL"
+  else
+    sleep "$INTERVAL"
+  fi
 done
