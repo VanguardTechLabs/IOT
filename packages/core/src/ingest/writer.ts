@@ -1,6 +1,8 @@
 import { getPool } from '../db/index.js';
 import { env } from '../env.js';
 import { createLogger } from '../logger.js';
+import { CHANNELS, publish } from '../redis.js';
+import type { StatusEvent } from '../types.js';
 
 const log = createLogger('writer');
 
@@ -128,6 +130,9 @@ export class TelemetryWriter {
   ): Promise<void> {
     const pool = getPool();
     const client = await pool.connect();
+    // Published only after COMMIT — the panel must never be told about presence
+    // that a rollback then discards.
+    let statusEvents: StatusEvent[] = [];
     try {
       await client.query('BEGIN');
 
@@ -180,7 +185,15 @@ export class TelemetryWriter {
           values.push(deviceId, t.messages, t.points, t.lastSeen, t.transport);
           i += 1;
         }
-        await client.query(
+        const updated = await client.query<{
+          id: string;
+          user_id: string;
+          online: boolean;
+          last_seen_at: Date | null;
+          message_count: string | number;
+          point_count: string | number;
+          last_transport: string | null;
+        }>(
           `UPDATE devices d
               SET message_count = d.message_count + v.messages,
                   point_count   = d.point_count + v.points,
@@ -188,9 +201,29 @@ export class TelemetryWriter {
                   last_transport = v.transport,
                   online = true
              FROM (VALUES ${placeholders.join(',')}) AS v(device_id, messages, points, last_seen, transport)
-            WHERE d.id = v.device_id`,
+            WHERE d.id = v.device_id
+        RETURNING d.id, d.user_id, d.online, d.last_seen_at, d.message_count, d.point_count,
+                  d.last_transport`,
           values,
         );
+
+        // Presence and the counters used to move only in the database. The panel
+        // patches them from CHANNELS.status, which was published solely by the
+        // presence helpers — so on a page left open, "last seen" drifted to
+        // "12 minutes ago" while tiles kept flashing new values, and an HTTP
+        // device swept offline never came back until a reload.
+        //
+        // The tallies map only holds devices that reported during this flush, so
+        // this publishes at the uplink rate, not once per row.
+        statusEvents = updated.rows.map((r) => ({
+          deviceId: r.id,
+          userId: r.user_id,
+          online: r.online,
+          lastSeenAt: r.last_seen_at ? new Date(r.last_seen_at).toISOString() : null,
+          messageCount: Number(r.message_count),
+          pointCount: Number(r.point_count),
+          transport: r.last_transport ?? undefined,
+        }));
       }
 
       await client.query('COMMIT');
@@ -198,9 +231,19 @@ export class TelemetryWriter {
     } catch (err) {
       await client.query('ROLLBACK').catch(() => undefined);
       this.droppedRows += rows.length;
+      statusEvents = [];
       log.error({ err: (err as Error).message, rows: rows.length }, 'telemetry flush failed');
     } finally {
       client.release();
+    }
+
+    // Outside the try/finally so the connection is already back in the pool, and
+    // individually caught: a Redis hiccup must degrade the live panel, never the
+    // write path that just succeeded.
+    for (const event of statusEvents) {
+      await publish(CHANNELS.status, event).catch((err) =>
+        log.debug({ err: (err as Error).message }, 'status publish failed'),
+      );
     }
   }
 

@@ -39,7 +39,6 @@ reference variables:
 
 ```bash
 docker compose exec api node packages/core/dist/db/seed.js
-# → demo@pulse.io / pulse1234, plus a device key and token printed once
 ```
 
 ### Tests
@@ -151,8 +150,10 @@ docker compose exec api node apps/simulator/dist/provision.js --devices 100 --in
 docker compose exec api node apps/simulator/dist/run.js --devices 100 --interval 10
 ```
 
-`provision.js` writes to the database directly and deliberately bypasses the plan
-ceiling — a load test that has to respect a 2-device limit cannot prove the platform
+`provision.js` attaches its devices to an **existing** account — pass
+`--email you@example.com`; it will not create one, precisely so a load test cannot
+leave a working login behind on a production server. It writes to the database
+directly and deliberately bypasses the plan ceiling — a load test that has to respect a 2-device limit cannot prove the platform
 holds 100. It writes `simulated-devices.json`, which `run.js` then drives over MQTT
 with jittered start times so the broker sees a steady rate rather than a herd.
 

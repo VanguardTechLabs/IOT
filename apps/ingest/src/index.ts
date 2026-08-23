@@ -45,7 +45,13 @@ async function main() {
   });
 
   client.on('message', (topic, payload) => {
-    void handleMessage(topic, payload);
+    // handleMessage awaits Redis and Postgres, either of which can reject. The
+    // listener is async and nothing observes its promise, so without this catch
+    // a single bad message becomes an unhandledRejection and takes down the one
+    // process that writes all MQTT telemetry.
+    void handleMessage(topic, payload).catch((err) => {
+      log.error({ err: (err as Error).message, topic }, 'message handling failed');
+    });
   });
 
   async function handleMessage(topic: string, payload: Buffer) {

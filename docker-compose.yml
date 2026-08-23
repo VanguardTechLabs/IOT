@@ -1,9 +1,20 @@
 name: pulse
 
+# Docker's default json-file driver never rotates. Two paths here log on every
+# retry during an outage — mqtt.js reconnects every 2 s, and the writer logs each
+# failed flush — so an unattended weekend of Postgres being down can fill the disk
+# and take the whole stack down with it.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   postgres:
     image: timescale/timescaledb:latest-pg16
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-pulse}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -41,6 +52,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *logging
     command: ["redis-server", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -51,6 +63,7 @@ services:
   emqx:
     image: emqx/emqx:5.8.4
     restart: unless-stopped
+    logging: *logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -92,6 +105,7 @@ services:
       context: .
       dockerfile: Dockerfile.node
     restart: unless-stopped
+    logging: *logging
     command: ["node", "apps/api/dist/server.js"]
     depends_on:
       postgres:
@@ -139,6 +153,7 @@ services:
       context: .
       dockerfile: Dockerfile.node
     restart: unless-stopped
+    logging: *logging
     command: ["node", "apps/ingest/dist/index.js"]
     depends_on:
       api:
@@ -152,6 +167,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
+    logging: *logging
     depends_on:
       - api
     environment:
@@ -169,6 +185,7 @@ services:
   certsync:
     image: alpine:3.20
     restart: unless-stopped
+    logging: *logging
     depends_on:
       - web
     environment:

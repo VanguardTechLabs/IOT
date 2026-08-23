@@ -47,7 +47,6 @@ const schema = z.object({
   DEVICE_OFFLINE_GRACE_MULTIPLIER: int(3),
   DEVICE_OFFLINE_MIN_GRACE_S: int(45),
 
-  TELEMETRY_RETENTION_DAYS: int(30),
 });
 
 export type Env = z.infer<typeof schema>;

@@ -44,7 +44,22 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     '/ingest',
     {
-      config: { rateLimit: { max: 600, timeWindow: '1 minute' } },
+      config: {
+        rateLimit: {
+          max: 600,
+          timeWindow: '1 minute',
+          // 600/min was sized as a PER-DEVICE budget (10/s). The global key is
+          // req.ip — correct for /auth, but on this route it would put an entire
+          // site behind one NAT into a single bucket: 100 devices at the 10 s
+          // default is exactly 600/min, so the fleet would start taking silent
+          // 429s. Adding the device key back is safe here because the store
+          // namespaces buckets per route, so a spoofed header cannot reach the
+          // /auth/login bucket. Per-device abuse is separately capped after
+          // authentication by consumeBurstToken().
+          keyGenerator: (req: { ip: string; headers: Record<string, unknown> }) =>
+            `${req.ip}|${(req.headers['x-device-key'] as string | undefined) ?? ''}`,
+        },
+      },
       bodyLimit: 64 * 1024,
     },
     async (req, reply) => {
@@ -107,7 +122,18 @@ export const ingestRoutes: FastifyPluginAsync = async (app) => {
       // would surface as an unhandledRejection and terminate the whole API.
       // handleUplink still awaits Redis and Postgres, either of which can reject.
       try {
-        const outcome = await ingest.handleUplink(device, payload, 'ws');
+        // Re-resolve rather than trusting the snapshot taken at connect. A long
+        // -lived socket would otherwise keep ingesting after the device was
+        // disabled or deleted in the panel — the MQTT path is cut off by the
+        // broker ACL, but nothing was cutting off this one. Served from the
+        // registry cache between invalidations, so it costs nothing per message.
+        const current = await ingest.resolveDevice(device.deviceKey);
+        if (!current || !current.enabled) {
+          socket.close(1008, 'device revoked');
+          return;
+        }
+
+        const outcome = await ingest.handleUplink(current, payload, 'ws');
         socket.send(
           JSON.stringify({
             type: 'ack',

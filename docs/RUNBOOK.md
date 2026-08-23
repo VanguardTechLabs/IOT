@@ -4,7 +4,7 @@ Steps 1–2 record where the contract actually stands and what is still owed by 
 client. Steps 3–6 must happen before anything touches Edwin's server; 7–9 are the
 delivery itself.
 
-*Last reviewed: 2026-08-19.*
+*Last reviewed: 2026-08-21 — the platform is deployed and verified in production.*
 
 ---
 
@@ -39,14 +39,15 @@ thing stands between here and handover — **a server to put it on.**
 - Edwin has opened a Contabo account and asked which region to choose — answered:
   the one closest to him.
 
-### Still owed by Edwin
+### Received  ✅
 
-1. **The VPS IP and root password**, once the instance finishes provisioning.
-2. **A domain or subdomain**, with access to its DNS panel. If it is on Cloudflare,
-   the MQTT subdomain must be **DNS only (grey cloud)** — see step 7.
+1. **VPS** — Contabo Cloud VPS 4, Ubuntu 24.04, `169.58.205.53`.
+2. **Hostname** — no purchase was needed. Contabo's own
+   `vmi3520387.contaboserver.net` resolves to the box and Let's Encrypt issued for
+   it, so the panel is on HTTPS and the broker on `mqtts` today. A branded domain
+   can replace it later with the same eight `.env` lines.
 
-Until both arrive, steps 3–6 are the useful work: boot the whole stack locally and
-find the problems here rather than on his machine.
+**The platform is live at https://vmi3520387.contaboserver.net.**
 
 > ### ⚠️ Credential hygiene
 >
@@ -81,21 +82,19 @@ Both must print without error before continuing.
 typechecked, but the containers have never run together. Find the problems here,
 not on Edwin's server.
 
-> ### ⚠️ Status: not yet performed
+> ### Status: superseded — deployed straight to the VPS
 >
-> As of 2026-08-19 this step has **not** been run — the development machine has no
-> Docker and installing it needs elevation plus two reboots. The decision was to
-> verify on the server instead, which means **the first time these containers ever
-> run together will be on Edwin's VPS.**
+> This step was never run locally: the development machine had no Docker, and
+> installing it needed elevation plus two reboots. The stack was deployed directly
+> to Edwin's server instead, and **is now verified running there** — 7 containers
+> healthy, 7 migrations applied, HTTPS panel, `mqtts` on 8883.
 >
-> That is a real risk, not a formality. Build, typecheck and the 24 tests all pass,
-> but they exercise pure logic — no test starts Postgres, EMQX or Caddy. If you get
-> access to any machine with Docker before deploying, run this section there first;
-> it costs ten minutes and it is the difference between debugging on your box and
-> debugging on the client's.
->
-> If you go straight to the server, work through **step 8's first-boot checklist**,
-> which covers exactly what this step would have caught.
+> Two defects were found by that first real boot that no amount of review had
+> caught: a Socket.IO/@fastify-websocket upgrade-listener race that broke every
+> WebSocket, and a certsync timing bug that would have left broker TLS dead for
+> twelve hours. Both are fixed. **Keep this section** — it remains the right way to
+> bring the stack up on any new machine, and the checklist in step 8 is what
+> confirms it.
 
 ### 4.1 Configure
 
@@ -133,7 +132,7 @@ docker compose ps
 ```powershell
 docker compose logs api --tail=40
 ```
-**Expected:** migration lines for `0001`…`0006`, then `database up to date`, then
+**Expected:** migration lines for `0001`…`0007`, then `database up to date`, then
 `api listening`.
 **If it fails:** read the migration error. A TimescaleDB failure on `0002`/`0003`
 means the extension did not load — check `docker compose logs postgres`.
@@ -297,9 +296,9 @@ Firewall: `ufw allow 22,80,443,1883,8883/tcp`. Do **not** open 18083 or 5432.
 
 ### 8.1 First-boot checklist
 
-Because step 4 was never run locally, this is the first time the stack has started
-anywhere. Check these in order — each one is a specific failure that was fixed but
-never observed running, so this is where they get confirmed.
+Every row below has been run against the live deployment and passed. Re-run them
+after any redeploy, and in full on any new server — each one confirms a specific
+defect that was fixed but is invisible until the stack actually runs.
 
 Run everything from `/opt/pulse` — compose bind-mounts `./infra/emqx/emqx.conf` and
 `./infra/certsync/sync.sh` relatively, and from any other directory those become empty
@@ -315,20 +314,26 @@ docker compose ps                      # every service up; none restarting
 
 | # | Check | Expected | If it fails |
 |---|---|---|---|
-| 1 | `docker compose logs api --tail=40` | `applying migration` ×6 then `api listening`. **Only on the very first boot** — later starts log just `database up to date` with `count:6`, which is equally good | a `dist/server.js` MODULE_NOT_FOUND means a stale build context — `docker compose build --no-cache api` |
+| 1 | `docker compose logs api --tail=40` | `applying migration` ×7 then `api listening`. **Only on the very first boot** — later starts log just `database up to date` with `count:7`, which is equally good | a `dist/server.js` MODULE_NOT_FOUND means a stale build context — `docker compose build --no-cache api` |
 | 2 | `docker compose exec -T api printenv PGHOST PGPORT PGUSER PGDATABASE` | `postgres` / `5432` / `pulse` / `pulse` | the discrete `PG*` variables did not reach the container; `docker compose logs api | grep "Set DATABASE_URL"` confirms it |
-| 3 | `docker compose exec -T postgres psql -U pulse -d pulse -c "SELECT name FROM _migrations ORDER BY name;"` | all **six** migration filenames, including `0006_realtime_aggregates.sql` | migrations did not complete — read the api logs, not the postgres logs; the API runs them |
+| 3 | `docker compose exec -T postgres psql -U pulse -d pulse -c "SELECT name FROM _migrations ORDER BY name;"` | all **seven** migration filenames, including `0007_aggregate_compression.sql` | migrations did not complete — read the api logs, not the postgres logs; the API runs them |
 | 4 | `ss -lntp | grep -E "5432|18083"` on the host | both bound to **127.0.0.1 only** | the loopback bind did not take effect — do not proceed until it has |
 | 5 | Panel → change a device's interval | the device receives `{"interval":"..."}` on `d/<key>/dn` | check the retained publish in the api logs |
 | 6 | Panel → a 24 h and a 30 d chart | both plot the **whole** range, right up to now | rollup re-bucketing or real-time aggregation |
 
-> **TLS rows deliberately absent.** Until Edwin supplies a domain, `MQTT_DOMAIN` is
-> empty and `MQTT_TLS_ENABLED=false`, so certsync idles and EMQX never opens 8883.
-> `docker compose exec emqx ls /opt/emqx/etc/certs` being **empty is correct**, and the
-> only expected certsync line is
+### TLS checks — all four verified on 2026-08-21
+
+| # | Check | Expected |
+|---|---|---|
+| 7 | `docker compose exec -T emqx ls -l /opt/emqx/etc/certs` | `mqtt.crt` and `mqtt.key` owned by **emqx (uid 1000)**, not root — without this EMQX cannot read its own key and 8883 silently never opens |
+| 8 | `docker compose logs certsync` | `installed a new certificate for <MQTT_DOMAIN>` |
+| 9 | `openssl s_client -connect <MQTT_DOMAIN>:8883 -servername <MQTT_DOMAIN> </dev/null` | handshake completes, chain valid to a public root, `CN` matches the hostname |
+| 10 | `crontab -l` | the weekly `docker compose restart emqx` — EMQX reads its certificate **only at boot**, so without it a renewed cert is never picked up and every device fails TLS about 60 days in |
+
+> If `MQTT_DOMAIN` is empty (no domain yet), skip rows 7–10: certsync idles by
+> design and logs
 > `[certsync] MQTT_DOMAIN is not set — TLS for the broker is disabled, idling.`
-> Check the certificate rows only after the domain exists — otherwise you will spend
-> an evening debugging a listener that was never meant to start.
+> Chasing a listener that was never meant to start costs an evening.
 
 > **First boot noise that is not a failure.** `emqx` only waits on `postgres`, so it
 > can accept connections before the API has created the `emqx_authn`/`emqx_acl` views
@@ -348,7 +353,7 @@ docker compose ps                      # every service up; none restarting
 
 ```bash
 docker compose logs ingest --tail=20
-docker compose exec api node apps/simulator/dist/provision.js --devices 5
+docker compose exec api node apps/simulator/dist/provision.js --devices 5 --email you@example.com
 docker compose exec api node apps/simulator/dist/run.js --devices 5 --interval 10
 ```
 
@@ -357,6 +362,23 @@ Read `written`/`dropped` from `docker compose logs ingest`, **not** from `/healt
 
 Watch the live panel, then **delete the five test devices from the admin panel**
 before handover. Do not leave test data in his production system.
+
+---
+
+## 8.3 If a device credential leaks
+
+Rotating the token does **not** disconnect the device that is already connected —
+EMQX authenticates at CONNECT, and an established session keeps publishing on the
+old credential until it happens to reconnect. To actually cut one off:
+
+1. **Disable** the device in the panel. That drops its rows from `emqx_acl`, and
+   EMQX's authorization cache expires within 60 s, so the live session stops being
+   able to publish.
+2. Wait a minute, then **Rotate token** and copy the new one.
+3. **Re-enable** the device and flash the new token.
+
+Disabling first is the part that matters — do it in the other order and the leaked
+credential keeps working until the device reconnects on its own.
 
 ---
 

@@ -14,7 +14,6 @@ import {
   closeDatabase,
   createLogger,
   db,
-  hashPassword,
   newDeviceKey,
   newDeviceToken,
   newSalt,
@@ -52,14 +51,22 @@ async function main() {
   await waitForDatabase();
   await runMigrations();
 
-  let rows = await db.select({ id: tables.users.id }).from(tables.users).where(eq(tables.users.email, email)).limit(1);
+  const rows = await db
+    .select({ id: tables.users.id })
+    .from(tables.users)
+    .where(eq(tables.users.email, email))
+    .limit(1);
+
+  // Deliberately does NOT create the account. It used to, with a hardcoded
+  // password that is printed in the README — and both DEPLOY.md and the RUNBOOK
+  // tell you to run this on the client's server, so a load test left a working
+  // login behind on production. Attach to an account that already exists.
   if (rows.length === 0) {
-    const [created] = await db
-      .insert(tables.users)
-      .values({ email, name: 'Load Test', passwordHash: await hashPassword('pulse1234') })
-      .returning({ id: tables.users.id });
-    rows = [created!];
-    log.info({ email, password: 'pulse1234' }, 'created load-test account');
+    log.error(
+      { email },
+      'no such account — create it in the panel first, or pass --email <existing account>',
+    );
+    process.exit(1);
   }
   const userId = rows[0]!.id;
 

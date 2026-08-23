@@ -134,7 +134,7 @@ nothing outside the Compose network needs it.
 ```bash
 curl -s https://pulse.example.com/health | jq
 docker compose logs --tail=50 ingest      # "subscribed" on the three topic filters
-docker compose exec api node apps/simulator/dist/provision.js --devices 5
+docker compose exec api node apps/simulator/dist/provision.js --devices 5 --email you@example.com
 docker compose exec api node apps/simulator/dist/run.js --devices 5 --interval 10
 ```
 
@@ -147,18 +147,55 @@ delete them from the admin panel before handing the system over.
 
 Only Postgres holds anything irreplaceable.
 
-```bash
-# /etc/cron.daily/pulse-backup
-docker compose -f /opt/pulse/docker-compose.yml exec -T postgres \
-  pg_dump -U pulse -Fc pulse > /var/backups/pulse-$(date +\%F).dump
+```sh
+#!/bin/sh
+# /etc/cron.daily/pulse-backup   —  remember chmod +x
+set -eu
+cd /opt/pulse
+D=$(date +%F)
+docker compose exec -T postgres pg_dump -U pulse -Fc pulse > "/var/backups/pulse-$D.dump.partial"
+mv "/var/backups/pulse-$D.dump.partial" "/var/backups/pulse-$D.dump"
 find /var/backups -name 'pulse-*.dump' -mtime +14 -delete
+
+# A copy on the same disk does not survive losing the VPS. Send it elsewhere:
+# scp "/var/backups/pulse-$D.dump" backup@elsewhere:/backups/
 ```
 
-A full dump of 30 days of telemetry for 100 devices is a few GB. If that grows
-uncomfortable, dump with `--exclude-table-data=telemetry` — the configuration is
-what is hard to recreate; a gap in historical sensor readings is not.
+Three details that are the whole point of writing it this way:
+
+- **`set -eu` plus the `.partial` rename.** Without them a failed `pg_dump` leaves a
+  truncated file, the `find` then deletes the last *good* dump, and two weeks later
+  every backup you own is corrupt. The rename runs only if `pg_dump` exited 0.
+- **`cd /opt/pulse`.** Compose resolves the relative bind mounts against the working
+  directory, and running it from elsewhere has already caused one silent
+  misconfiguration in this project.
+- **The off-box copy is not optional.** A dump sitting on the disk you are insuring
+  against is not a backup.
+
+### Restoring
+
+TimescaleDB cannot be restored with a plain `pg_restore` — the hypertable metadata
+has to be quiesced first, or the restore silently produces a database whose chunks
+are invisible:
+
+```bash
+cd /opt/pulse
+docker compose exec -T postgres createdb -U pulse pulse_restore
+docker compose exec -T postgres psql -U pulse -d pulse_restore -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+docker compose exec -T postgres psql -U pulse -d pulse_restore -c "SELECT timescaledb_pre_restore();"
+docker compose exec -T postgres pg_restore -U pulse -d pulse_restore --no-owner < /var/backups/pulse-YYYY-MM-DD.dump
+docker compose exec -T postgres psql -U pulse -d pulse_restore -c "SELECT timescaledb_post_restore();"
+```
+
+Restore into `pulse_restore` first and check the row counts before pointing the
+stack at it.
+
+> **Run this once before handover.** An untested backup is a guess, and the failure
+> mode — a restore that appears to succeed while the telemetry chunks are invisible
+> — is exactly the kind you find out about on the day you need it.
 
 ---
+
 
 ## 7. Upgrades
 

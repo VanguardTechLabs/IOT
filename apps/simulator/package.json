@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx src/run.ts",
     "start": "node dist/run.js",
     "provision": "node dist/provision.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
