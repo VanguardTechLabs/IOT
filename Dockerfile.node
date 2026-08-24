@@ -31,11 +31,13 @@ RUN pnpm --filter @pulse/core build \
 
 FROM base AS runtime
 ENV NODE_ENV=production
-COPY --from=build /app /app
-# The simulator writes simulated-devices.json into the working directory, so the
-# unprivileged runtime user has to own it. Without this, `provision.js` fails with
-# EACCES the first time anyone runs a load test.
-RUN chown -R node:node /app
+# --chown rather than a separate `RUN chown -R`. The simulator writes
+# simulated-devices.json into the working directory, so the unprivileged runtime
+# user has to own it — but doing that as its own layer walks every file in
+# node_modules a second time. On the production VPS that step took 226s on one
+# build and was still running after 1178s on the next; applying ownership while
+# the layer is written costs nothing extra.
+COPY --from=build --chown=node:node /app /app
 USER node
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "apps/api/dist/server.js"]
