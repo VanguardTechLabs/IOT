@@ -5,6 +5,8 @@ import { Shell } from './components/Shell';
 import { Spinner } from './components/ui';
 import { LoginPage } from './pages/Login';
 import { DevicesPage } from './pages/Devices';
+import { DashboardsPage } from './pages/Dashboards';
+import { DashboardDetailPage } from './pages/DashboardDetail';
 import { DeviceDetailPage } from './pages/DeviceDetail';
 import { AccountPage } from './pages/Account';
 import { AdminPage } from './pages/Admin';
@@ -56,6 +58,8 @@ export default function App() {
               }
             >
               <Route path="/devices" element={<DevicesPage />} />
+              <Route path="/dashboards" element={<DashboardsPage />} />
+              <Route path="/dashboards/:id" element={<DashboardDetailPage />} />
               <Route path="/devices/:id" element={<DeviceDetailPage />} />
               <Route path="/account" element={<AccountPage />} />
               <Route path="/admin" element={<AdminPage />} />

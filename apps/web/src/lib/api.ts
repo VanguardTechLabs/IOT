@@ -139,6 +139,62 @@ export interface Variable {
   sortOrder: number;
 }
 
+// ── Dashboards (phase 2) ────────────────────────────────────────────────────
+
+export const WIDGET_TYPES = [
+  'gauge',
+  'tank',
+  'thermometer',
+  'number',
+  'chart',
+  'toggle',
+  'button',
+  'slider',
+  'text',
+] as const;
+export type WidgetType = (typeof WIDGET_TYPES)[number];
+
+/** Widgets that write back to the device, so they need a writable variable. */
+export const INTERACTIVE_WIDGETS: readonly WidgetType[] = ['toggle', 'button', 'slider'];
+/** Widgets that display no variable at all. */
+export const VARIABLE_FREE_WIDGETS: readonly WidgetType[] = ['text'];
+
+export interface WidgetConfig {
+  label?: string;
+  unit?: string;
+  color?: string;
+  min?: number;
+  max?: number;
+  decimals?: number;
+  step?: number;
+  onValue?: string;
+  offValue?: string;
+  rangeMs?: number;
+  body?: string;
+}
+
+export interface Widget {
+  id: string;
+  dashboardId: string;
+  variableId: string | null;
+  type: WidgetType;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  config: WidgetConfig;
+  createdAt: string;
+}
+
+export interface Dashboard {
+  id: string;
+  deviceId: string | null;
+  name: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface StateEntry {
   variableId: string;
   key: string;

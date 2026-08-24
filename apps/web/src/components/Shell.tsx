@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Activity, Cpu, LogOut, Radio, Settings, ShieldCheck } from 'lucide-react';
+import { Activity, Cpu, LogOut, Radio, Settings, ShieldCheck, LayoutGrid } from 'lucide-react';
 import clsx from 'clsx';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
@@ -7,6 +7,7 @@ import { getSocket } from '../lib/socket';
 
 const NAV = [
   { to: '/devices', label: 'Devices', icon: Cpu },
+  { to: '/dashboards', label: 'Dashboards', icon: LayoutGrid },
   { to: '/account', label: 'Account', icon: Settings },
 ];
 
