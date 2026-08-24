@@ -25,6 +25,7 @@ import { attachRealtime } from './realtime.js';
 import { accountRoutes } from './routes/account.js';
 import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
+import { dashboardRoutes } from './routes/dashboards.js';
 import { deviceRoutes } from './routes/devices.js';
 import { exportRoutes } from './routes/export.js';
 import { ingestRoutes } from './routes/ingest.js';
@@ -102,6 +103,7 @@ async function main() {
       await v1.register(authRoutes, { prefix: '/auth' });
       await v1.register(deviceRoutes, { prefix: '/devices' });
       await v1.register(variableRoutes);
+      await v1.register(dashboardRoutes);
       await v1.register(telemetryRoutes);
       await v1.register(exportRoutes);
       await v1.register(accountRoutes);

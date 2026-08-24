@@ -7,6 +7,7 @@ import {
   jsonb,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -204,6 +205,54 @@ export const apiKeys = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('api_keys_hash_idx').on(t.keyHash), index('api_keys_user_idx').on(t.userId)],
+);
+
+/**
+ * A dashboard the user composes themselves, as opposed to the fixed one-tile-per
+ * -variable layout on the device page.
+ */
+export const dashboards = pgTable(
+  'dashboards',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Null = spans several devices. Set = belongs to one, and dies with it. */
+    deviceId: uuid('device_id').references(() => devices.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('dashboards_user_idx').on(t.userId, t.sortOrder), index('dashboards_device_idx').on(t.deviceId)],
+);
+
+/**
+ * One widget on a dashboard. Position is in GRID UNITS on a 12-column grid, not
+ * pixels — a pixel layout does not survive a different screen width, and the same
+ * rows have to render in the mobile app.
+ */
+export const widgets = pgTable(
+  'widgets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    dashboardId: uuid('dashboard_id')
+      .notNull()
+      .references(() => dashboards.id, { onDelete: 'cascade' }),
+    /** Null for widgets that show no variable, e.g. a text note. */
+    variableId: uuid('variable_id').references(() => variables.id, { onDelete: 'cascade' }),
+    /** gauge | tank | thermometer | number | chart | toggle | button | slider | text */
+    type: text('type').notNull(),
+    x: smallint('x').notNull().default(0),
+    y: smallint('y').notNull().default(0),
+    w: smallint('w').notNull().default(3),
+    h: smallint('h').notNull().default(2),
+    /** Per-type options. Schemaless on purpose — a column per option would mean a migration per widget type. */
+    config: jsonb('config').notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('widgets_dashboard_idx').on(t.dashboardId), index('widgets_variable_idx').on(t.variableId)],
 );
 
 /** Broker credentials for the API/ingest services (EMQX superusers). */
