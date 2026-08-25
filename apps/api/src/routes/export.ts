@@ -43,6 +43,18 @@ function quoteIdent(key: string): string {
   return `"${key.replace(/"/g, '""')}"`;
 }
 
+/** The three columns every wide export starts with. */
+const FIXED_COLUMNS = ['timestamp_utc', 'timestamp_local', 'timezone'];
+
+/**
+ * A variable may legitimately be called "timezone". Postgres is happy to emit two
+ * columns with the same header, so the CSV would not error — it would just be
+ * quietly ambiguous in a spreadsheet. Suffix the variable's column instead.
+ */
+function csvColumnName(key: string): string {
+  return FIXED_COLUMNS.includes(key.toLowerCase()) ? `${key}_value` : key;
+}
+
 /** COPY does not take bind parameters, so every interpolated value is validated first. */
 function assertUuid(value: string): string {
   if (!UUID_RE.test(value)) throw badRequest(`invalid id: ${value}`);
@@ -108,7 +120,7 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     // so grouping by ts gives one row per cycle; max() is just the aggregate that
     // picks the single non-null value each CASE produces.
     const pivot = columns
-      .map((v) => `               max(CASE WHEN t.variable_id = '${v.id}'::uuid THEN ${VALUE_EXPR} END) AS ${quoteIdent(v.key)}`)
+      .map((v) => `               max(CASE WHEN t.variable_id = '${v.id}'::uuid THEN ${VALUE_EXPR} END) AS ${quoteIdent(csvColumnName(v.key))}`)
       .join(',\n');
 
     const sql =
