@@ -13,7 +13,7 @@ import {
   api,
   ApiError,
   type Dashboard,
-  type SeriesResponse,
+  type VariableSeriesResponse,
   type StateEntry,
   type Variable,
   type Widget,
@@ -49,14 +49,16 @@ function ChartWidget({ widget }: { widget: Widget }) {
     refetchInterval: 30_000,
     queryFn: () => {
       const now = Date.now();
-      return api.get<SeriesResponse>(
+      return api.get<VariableSeriesResponse>(
         `/variables/${widget.variableId}/series?from=${now - rangeMs}&to=${now}&maxPoints=120`,
       );
     },
   });
 
-  const points = data?.series?.[0]?.points ?? [];
-  const color = widget.config.color ?? data?.series?.[0]?.variable.color ?? '#38bdf8';
+  // Top level, not data.series[0] — that is the multi-series endpoint's shape, and
+  // reading it here meant the chart silently rendered "No data yet" forever.
+  const points = data?.points ?? [];
+  const color = widget.config.color ?? data?.variable.color ?? '#38bdf8';
 
   if (points.length === 0) return <div className="text-xs text-slate-500">No data yet</div>;
 

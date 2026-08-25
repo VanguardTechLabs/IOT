@@ -36,6 +36,16 @@ const TYPE_LABELS: Record<WidgetType, string> = {
   text: 'Text note',
 };
 
+/** Time windows offered for a chart widget. */
+const CHART_RANGES: ReadonlyArray<{ label: string; ms: number }> = [
+  { label: 'Last 15 minutes', ms: 15 * 60_000 },
+  { label: 'Last hour', ms: 60 * 60_000 },
+  { label: 'Last 6 hours', ms: 6 * 60 * 60_000 },
+  { label: 'Last 24 hours', ms: 24 * 60 * 60_000 },
+  { label: 'Last 7 days', ms: 7 * 24 * 60 * 60_000 },
+  { label: 'Last 30 days', ms: 30 * 24 * 60 * 60_000 },
+];
+
 /** Which config fields each type actually uses. */
 const USES_RANGE: readonly WidgetType[] = ['gauge', 'tank', 'thermometer', 'slider'];
 const USES_DECIMALS: readonly WidgetType[] = ['gauge', 'tank', 'thermometer', 'number'];
@@ -206,6 +216,24 @@ export function WidgetEditor({
               />
             </Field>
           </div>
+        )}
+
+        {type === 'chart' && (
+          <Field
+            label="Time window"
+            hint="A chart only draws if the device reported inside this window."
+          >
+            <Select
+              value={String(config.rangeMs ?? 3_600_000)}
+              onChange={(e) => patch({ rangeMs: Number(e.target.value) })}
+            >
+              {CHART_RANGES.map((r) => (
+                <option key={r.ms} value={r.ms}>
+                  {r.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
         )}
 
         {type === 'slider' && (

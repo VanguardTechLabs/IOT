@@ -226,6 +226,19 @@ export interface SeriesResponse {
   }>;
 }
 
+/**
+ * GET /variables/:id/series — one variable, points at the top level.
+ * Deliberately NOT the same shape as SeriesResponse (GET /devices/:id/series),
+ * which nests everything under `series`.
+ */
+export interface VariableSeriesResponse {
+  variable: Pick<Variable, 'id' | 'key' | 'label' | 'type' | 'unit' | 'color'>;
+  from: number;
+  to: number;
+  resolution: 'raw' | '1m' | '1h';
+  points: SeriesPoint[];
+}
+
 export interface ConnectionInfo {
   deviceKey: string;
   tokenPreview: string;
