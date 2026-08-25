@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { StateEntry, Widget } from '../../lib/api';
 import { relativeTime } from '../../lib/format';
 
@@ -188,17 +188,36 @@ function NumberView({ widget, entry }: WidgetViewProps) {
 // ── Toggle ──────────────────────────────────────────────────────────────────
 
 function Toggle({ widget, entry, onCommand, disabled }: WidgetViewProps) {
-  const on = (numeric(entry) ?? 0) >= 0.5;
+  const deviceOn = (numeric(entry) ?? 0) >= 0.5;
   const color = widget.config.color ?? entry?.color ?? '#22c55e';
+
+  // The switch used to render purely from the device's reported value, so it did
+  // not move until the firmware echoed the change back — and never at all if the
+  // device was offline. Flip immediately, then defer to the device once it agrees.
+  const [pending, setPending] = useState<boolean | null>(null);
+  const on = pending ?? deviceOn;
+
+  useEffect(() => {
+    if (pending !== null && deviceOn === pending) setPending(null);
+  }, [deviceOn, pending]);
+
+  // If the device never confirms, stop pretending rather than lying indefinitely.
+  useEffect(() => {
+    if (pending === null) return;
+    const timer = setTimeout(() => setPending(null), 6000);
+    return () => clearTimeout(timer);
+  }, [pending]);
 
   return (
     <button
       type="button"
       disabled={disabled || !widget.variableId}
-      onClick={() =>
-        widget.variableId &&
-        onCommand?.(widget.variableId, on ? (widget.config.offValue ?? '0') : (widget.config.onValue ?? '1'))
-      }
+      onClick={() => {
+        if (!widget.variableId) return;
+        const next = !on;
+        setPending(next);
+        onCommand?.(widget.variableId, next ? (widget.config.onValue ?? '1') : (widget.config.offValue ?? '0'));
+      }}
       className="flex flex-col items-center gap-3 disabled:opacity-50"
     >
       <span
@@ -210,7 +229,10 @@ function Toggle({ widget, entry, onCommand, disabled }: WidgetViewProps) {
           style={{ transform: on ? 'translateX(33px)' : 'translateX(3px)' }}
         />
       </span>
-      <span className="text-xs font-medium text-slate-300">{on ? 'ON' : 'OFF'}</span>
+      <span className="text-xs font-medium text-slate-300">
+        {on ? 'ON' : 'OFF'}
+        {pending !== null && <span className="ml-1 text-slate-500">…</span>}
+      </span>
     </button>
   );
 }
@@ -219,16 +241,62 @@ function Toggle({ widget, entry, onCommand, disabled }: WidgetViewProps) {
 
 function PushButton({ widget, onCommand, disabled }: WidgetViewProps) {
   const color = widget.config.color ?? DEFAULT_COLOR;
+  const pulseMs = widget.config.pulseMs ?? 500;
+  const [held, setHeld] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // A momentary button: send the ON value, then return to OFF by itself. Without
+  // the second send the variable stays at 1 forever and the next press is a no-op.
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  const press = () => {
+    const variableId = widget.variableId;
+    if (!variableId) return;
+    onCommand?.(variableId, widget.config.onValue ?? '1');
+    if (pulseMs <= 0) return;
+    setHeld(true);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      onCommand?.(variableId, widget.config.offValue ?? '0');
+      setHeld(false);
+    }, pulseMs);
+  };
+
   return (
     <button
       type="button"
       disabled={disabled || !widget.variableId}
-      onClick={() => widget.variableId && onCommand?.(widget.variableId, widget.config.onValue ?? '1')}
+      onClick={press}
       className="rounded-lg px-6 py-3 text-sm font-semibold text-slate-950 shadow transition active:scale-95 disabled:opacity-50"
-      style={{ backgroundColor: color }}
+      style={{ backgroundColor: color, opacity: held ? 0.7 : undefined }}
     >
       {widget.config.label ?? 'Send'}
     </button>
+  );
+}
+
+// ── LED — a read-only lamp ──────────────────────────────────────────────────
+
+function Led({ widget, entry }: WidgetViewProps) {
+  const threshold = widget.config.threshold ?? 0.5;
+  const on = (numeric(entry) ?? 0) >= threshold;
+  const onColor = widget.config.onColor ?? '#22c55e';
+  const offColor = widget.config.offColor ?? '#334155';
+  const color = on ? onColor : offColor;
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <div
+        className="h-14 w-14 rounded-full border-2 transition-all duration-300"
+        style={{
+          backgroundColor: color,
+          borderColor: on ? color : '#475569',
+          // The glow is what makes it read as a lamp rather than a coloured dot.
+          boxShadow: on ? `0 0 18px 4px ${color}80` : 'none',
+        }}
+      />
+      <span className="text-xs font-medium text-slate-300">{on ? 'ON' : 'OFF'}</span>
+    </div>
   );
 }
 
@@ -300,6 +368,8 @@ export function WidgetView(props: WidgetViewProps) {
         return <NumberView {...props} />;
       case 'toggle':
         return <Toggle {...props} />;
+      case 'led':
+        return <Led {...props} />;
       case 'button':
         return <PushButton {...props} />;
       case 'slider':

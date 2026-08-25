@@ -151,6 +151,7 @@ export const WIDGET_TYPES = [
   'button',
   'slider',
   'text',
+  'led',
 ] as const;
 export type WidgetType = (typeof WIDGET_TYPES)[number];
 
@@ -169,6 +170,12 @@ export interface WidgetConfig {
   step?: number;
   onValue?: string;
   offValue?: string;
+  /** button: hold ON this long, then send OFF. 0 disables the pulse. */
+  pulseMs?: number;
+  /** led */
+  onColor?: string;
+  offColor?: string;
+  threshold?: number;
   rangeMs?: number;
   body?: string;
 }

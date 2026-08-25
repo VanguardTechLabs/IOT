@@ -34,6 +34,7 @@ const TYPE_LABELS: Record<WidgetType, string> = {
   button: 'Button',
   slider: 'Slider',
   text: 'Text note',
+  led: 'LED indicator',
 };
 
 /** Time windows offered for a chart widget. */
@@ -247,6 +248,70 @@ export function WidgetEditor({
           </Field>
         )}
 
+        {type === 'led' && (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Colour when ON">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={config.onColor ?? '#22c55e'}
+                    onChange={(e) => patch({ onColor: e.target.value })}
+                    className="h-9 w-14 cursor-pointer rounded border border-slate-700 bg-slate-950"
+                  />
+                  <Input
+                    value={config.onColor ?? ''}
+                    onChange={(e) => patch({ onColor: e.target.value || undefined })}
+                    placeholder="#22c55e"
+                  />
+                </div>
+              </Field>
+              <Field label="Colour when OFF">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={config.offColor ?? '#334155'}
+                    onChange={(e) => patch({ offColor: e.target.value })}
+                    className="h-9 w-14 cursor-pointer rounded border border-slate-700 bg-slate-950"
+                  />
+                  <Input
+                    value={config.offColor ?? ''}
+                    onChange={(e) => patch({ offColor: e.target.value || undefined })}
+                    placeholder="#334155"
+                  />
+                </div>
+              </Field>
+            </div>
+            <Field
+              label="Threshold"
+              hint="The lamp lights at or above this value. Leave empty for 0.5, which suits a 0/1 variable."
+            >
+              <Input
+                type="number"
+                value={config.threshold ?? ''}
+                onChange={(e) => patch({ threshold: num(e.target.value) })}
+                placeholder="0.5"
+              />
+            </Field>
+          </>
+        )}
+
+        {type === 'button' && (
+          <Field
+            label="Pulse duration (ms)"
+            hint="Sends the ON value, then the OFF value after this delay. Set 0 to send only ON."
+          >
+            <Input
+              type="number"
+              min={0}
+              max={10000}
+              value={config.pulseMs ?? ''}
+              onChange={(e) => patch({ pulseMs: num(e.target.value) })}
+              placeholder="500"
+            />
+          </Field>
+        )}
+
         {(type === 'toggle' || type === 'button') && (
           <div className="grid grid-cols-2 gap-3">
             <Field label="Value when ON" hint="Sent to the device as text.">
@@ -256,7 +321,7 @@ export function WidgetEditor({
                 placeholder="1"
               />
             </Field>
-            {type === 'toggle' && (
+            {(type === 'toggle' || type === 'button') && (
               <Field label="Value when OFF">
                 <Input
                   value={config.offValue ?? ''}

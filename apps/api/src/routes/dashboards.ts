@@ -22,6 +22,7 @@ export const WIDGET_TYPES = [
   'button',
   'slider',
   'text',
+  'led',
 ] as const;
 export type WidgetType = (typeof WIDGET_TYPES)[number];
 
@@ -30,6 +31,11 @@ const INTERACTIVE: ReadonlySet<string> = new Set(['toggle', 'button', 'slider'])
 
 /** Widgets that display no variable at all. */
 const VARIABLE_FREE: ReadonlySet<string> = new Set(['text']);
+
+/**
+ * An LED is read-only on purpose: it shows state, it does not set it. Binding it
+ * to a non-writable variable is therefore correct and must not be rejected.
+ */
 
 const GRID_COLUMNS = 12;
 
@@ -46,6 +52,13 @@ const widgetConfigSchema = z
     /** toggle / button — what to send. Strings, like every other downlink. */
     onValue: z.string().max(64).optional(),
     offValue: z.string().max(64).optional(),
+    /** button — hold the ON value this long, then send OFF. 0 disables the pulse. */
+    pulseMs: z.number().int().min(0).max(10_000).optional(),
+    /** led — colours either side of the threshold */
+    onColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+    offColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+    /** led — value at or above which the lamp counts as on. Defaults to 0.5. */
+    threshold: z.number().optional(),
     /** chart window, milliseconds */
     rangeMs: z.number().int().positive().optional(),
     /** text widget */
