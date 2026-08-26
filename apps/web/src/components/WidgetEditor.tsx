@@ -50,6 +50,19 @@ const CHART_RANGES: ReadonlyArray<{ label: string; ms: number }> = [
 /** Which config fields each type actually uses. */
 const USES_RANGE: readonly WidgetType[] = ['gauge', 'tank', 'thermometer', 'slider'];
 const USES_DECIMALS: readonly WidgetType[] = ['gauge', 'tank', 'thermometer', 'number'];
+/** A lamp has no unit, and a text note has no value to carry one. */
+const USES_UNIT: readonly WidgetType[] = ['gauge', 'tank', 'thermometer', 'number', 'slider'];
+/** The LED has its own on/off colours; offering a third would just confuse. */
+const USES_COLOR: readonly WidgetType[] = [
+  'gauge',
+  'tank',
+  'thermometer',
+  'number',
+  'chart',
+  'toggle',
+  'button',
+  'slider',
+];
 
 export function WidgetEditor({
   open,
@@ -334,13 +347,15 @@ export function WidgetEditor({
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Unit" hint="Overrides the variable's unit.">
-            <Input
-              value={config.unit ?? ''}
-              onChange={(e) => patch({ unit: e.target.value || undefined })}
-              placeholder={selected?.unit || '—'}
-            />
-          </Field>
+          {USES_UNIT.includes(type) && (
+            <Field label="Unit" hint="Overrides the variable's unit.">
+              <Input
+                value={config.unit ?? ''}
+                onChange={(e) => patch({ unit: e.target.value || undefined })}
+                placeholder={selected?.unit || '—'}
+              />
+            </Field>
+          )}
           {USES_DECIMALS.includes(type) && (
             <Field label="Decimals">
               <Input
@@ -355,6 +370,7 @@ export function WidgetEditor({
           )}
         </div>
 
+        {USES_COLOR.includes(type) && (
         <Field label="Colour">
           <div className="flex items-center gap-3">
             <input
@@ -370,6 +386,7 @@ export function WidgetEditor({
             />
           </div>
         </Field>
+        )}
       </div>
     </Modal>
   );
