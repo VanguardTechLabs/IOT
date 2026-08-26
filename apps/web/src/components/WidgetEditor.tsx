@@ -185,10 +185,19 @@ export function WidgetEditor({
           </Field>
         )}
 
-        {interactive && selectable.length === 0 && (
+        {needsVariable && selectable.length === 0 && (
           <Alert tone="amber">
-            None of this device's variables are writable yet. Open a variable's editor, tick{' '}
-            <strong>Writable</strong>, and it will appear here.
+            {variables.length === 0 ? (
+              <>
+                This device has no variables yet. They are created automatically the first time the
+                device sends data — or you can add one by hand from the device page.
+              </>
+            ) : (
+              <>
+                None of this device's variables are writable yet. Open a variable's editor on the
+                device page, tick <strong>Writable</strong>, and it will appear here.
+              </>
+            )}
           </Alert>
         )}
 
