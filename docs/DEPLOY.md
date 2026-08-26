@@ -199,6 +199,32 @@ stack at it.
 
 ## 7. Upgrades
 
+**Always redeploy with `--force-recreate`:**
+
+```bash
+cd /opt/pulse
+git pull
+docker compose up -d --build --force-recreate
+docker compose ps
+```
+
+Without it, Compose regularly rebuilds the images and then leaves the old
+containers running. BuildKit exports these images as multi-manifest artefacts
+with provenance attestations, and Compose does not reliably notice that the tag
+now points somewhere new — so `up -d --build` reports success while the code
+that is actually serving requests is unchanged.
+
+**How to spot it:** in `docker compose ps`, a healthy deployment shows image
+**tags** (`pulse-api`, `pulse-ingest`, `pulse-web`). If a row shows a raw
+`sha256:...` digest instead, that container is on an image the tag no longer
+points at — i.e. it is stale. Container age gives it away too: a service that
+says "16 hours ago" right after a deploy was never replaced.
+
+This has happened on this deployment more than once, and each time it looked like
+a code change that had not taken effect. `--force-recreate` costs a few seconds
+of restart and removes the whole class of problem.
+
+
 ```bash
 cd /opt/pulse && git pull
 docker compose up -d --build
