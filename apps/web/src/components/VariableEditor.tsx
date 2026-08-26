@@ -20,6 +20,9 @@ export interface VariableDraft {
   unit: string;
   writable: boolean;
   color: string;
+  /** Expected range. Gauges, tanks, thermometers and sliders default to these. */
+  minValue: number | null;
+  maxValue: number | null;
 }
 
 export function VariableEditor({
@@ -40,6 +43,8 @@ export function VariableEditor({
     label: '',
     type: 'float',
     unit: '',
+    minValue: null,
+    maxValue: null,
     writable: false,
     color: PALETTE[0],
   });
@@ -57,8 +62,19 @@ export function VariableEditor({
             unit: variable.unit,
             writable: variable.writable,
             color: variable.color,
+            minValue: variable.minValue,
+            maxValue: variable.maxValue,
           }
-        : { key: '', label: '', type: 'float', unit: '', writable: false, color: PALETTE[0] },
+        : {
+            key: '',
+            label: '',
+            type: 'float',
+            unit: '',
+            writable: false,
+            color: PALETTE[0],
+            minValue: null,
+            maxValue: null,
+          },
     );
   }, [open, variable]);
 
@@ -75,6 +91,8 @@ export function VariableEditor({
         unit: draft.unit,
         writable: draft.writable,
         color: draft.color,
+        minValue: draft.minValue,
+        maxValue: draft.maxValue,
       };
       if (draft.id) return api.patch(`/variables/${draft.id}`, body);
       return api.post(`/devices/${deviceId}/variables`, { ...body, key: draft.key });
@@ -156,6 +174,35 @@ export function VariableEditor({
           </Field>
           <Field label="Unit">
             <Input value={draft.unit} onChange={(e) => setDraft({ ...draft, unit: e.target.value })} placeholder="°C" />
+          </Field>
+        </div>
+
+        {/* Only meaningful for a numeric reading — a boolean or a string has no range. */}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="Expected minimum"
+            hint="Gauges and tanks use this as their scale. Optional."
+          >
+            <Input
+              type="number"
+              value={draft.minValue ?? ''}
+              onChange={(e) =>
+                setDraft({ ...draft, minValue: e.target.value === '' ? null : Number(e.target.value) })
+              }
+              placeholder="0"
+              disabled={draft.type === 'string' || draft.type === 'bool'}
+            />
+          </Field>
+          <Field label="Expected maximum">
+            <Input
+              type="number"
+              value={draft.maxValue ?? ''}
+              onChange={(e) =>
+                setDraft({ ...draft, maxValue: e.target.value === '' ? null : Number(e.target.value) })
+              }
+              placeholder="100"
+              disabled={draft.type === 'string' || draft.type === 'bool'}
+            />
           </Field>
         </div>
 
