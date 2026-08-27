@@ -9,6 +9,7 @@ import {
   type TelemetryPoint,
   type Transport,
 } from '../types.js';
+import { isOverQuota } from '../usage.js';
 import { registry, type CachedDevice, type DeviceRegistry } from './registry.js';
 import { TelemetryWriter } from './writer.js';
 
@@ -53,6 +54,7 @@ export class IngestEngine {
   constructor(opts: IngestEngineOptions) {
     this.redis = opts.redis;
     this.writer = opts.writer ?? new TelemetryWriter();
+    this.writer.quotaRedis = opts.redis;
     this.registry = opts.registry ?? registry;
   }
 
@@ -71,6 +73,14 @@ export class IngestEngine {
     forcedKey?: string,
   ): Promise<IngestOutcome> {
     if (!device.enabled) return { accepted: 0, rejected: [{ key: '*', reason: 'device disabled' }] };
+
+    // Over the monthly allowance: stop storing new telemetry until the next
+    // month. Nothing already stored is touched and the panel keeps working —
+    // the account simply stops adding to its history. Checked against Redis so
+    // this costs no database round trip on the hot path.
+    if (await isOverQuota(this.redis, device.userId)) {
+      return { accepted: 0, rejected: [{ key: '*', reason: 'monthly data limit reached' }] };
+    }
 
     const allowed = await consumeBurstToken(
       this.redis,
@@ -129,7 +139,7 @@ export class IngestEngine {
     }
 
     if (points.length > 0) {
-      this.writer.tally(device.id, points.length, transport, ts);
+      this.writer.tally(device.id, device.userId, points.length, transport, ts);
       await publish(CHANNELS.telemetry, {
         deviceId: device.id,
         userId: device.userId,

@@ -11,3 +11,4 @@ export * from './ingest/writer.js';
 export * from './ingest/engine.js';
 export * from './ingest/presence.js';
 export * from './plans.js';
+export * from './usage.js';

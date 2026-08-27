@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { and, desc, eq, sql } from 'drizzle-orm';
-import { db, getUserPlan, listPlans, newApiKey, preview, sha256, tables } from '@pulse/core';
+import { db, getUsage, getUserPlan, listPlans, newApiKey, preview, sha256, tables } from '@pulse/core';
 import { notFound, parse, uuidParam } from '../lib/http.js';
 
 export const accountRoutes: FastifyPluginAsync = async (app) => {
@@ -28,15 +28,26 @@ export const accountRoutes: FastifyPluginAsync = async (app) => {
       .innerJoin(tables.devices, eq(tables.devices.id, tables.variables.deviceId))
       .where(eq(tables.devices.userId, auth.id));
 
+    const [dashboardCount] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(tables.dashboards)
+      .where(eq(tables.dashboards.userId, auth.id));
+
+    // Read from the monthly counter, never from the telemetry hypertable — the
+    // panel should not trigger a scan of a month of a busy account.
+    const month = await getUsage(auth.id);
+
     return {
       plan,
       usage: {
         devices: counts?.deviceCount ?? 0,
         devicesOnline: counts?.onlineCount ?? 0,
         variables: variableCount?.count ?? 0,
+        dashboards: dashboardCount?.count ?? 0,
         messages: Number(counts?.messageCount ?? 0),
         points: Number(counts?.pointCount ?? 0),
       },
+      month,
     };
   });
 

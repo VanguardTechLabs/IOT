@@ -1,7 +1,9 @@
 import { getPool } from '../db/index.js';
 import { env } from '../env.js';
 import { createLogger } from '../logger.js';
+import type { Redis } from 'ioredis';
 import { CHANNELS, publish } from '../redis.js';
+import { recordUsage, setOverQuota } from '../usage.js';
 import type { StatusEvent } from '../types.js';
 
 const log = createLogger('writer');
@@ -33,12 +35,19 @@ export class TelemetryWriter {
   private rows: PendingRow[] = [];
   private latest = new Map<string, PendingRow>();
   private tallies = new Map<string, DeviceTally>();
+  /** Datapoints per user this flush, for the monthly quota. */
+  private usage = new Map<string, number>();
   private timer: NodeJS.Timeout | null = null;
   private flushing: Promise<void> | null = null;
   private stopped = false;
 
   public droppedRows = 0;
   public writtenRows = 0;
+  /**
+   * Set by the ingest engine. The writer is where a flush's row counts are known,
+   * so it is also where the monthly quota is updated and the over-limit flag set.
+   */
+  public quotaRedis: Redis | null = null;
 
   constructor(
     private readonly flushMs = env.INGEST_FLUSH_MS,
@@ -62,7 +71,8 @@ export class TelemetryWriter {
     this.schedule();
   }
 
-  tally(deviceId: string, points: number, transport: string, at: Date): void {
+  tally(deviceId: string, userId: string, points: number, transport: string, at: Date): void {
+    this.usage.set(userId, (this.usage.get(userId) ?? 0) + points);
     const current = this.tallies.get(deviceId);
     if (current) {
       current.messages += 1;
@@ -108,15 +118,17 @@ export class TelemetryWriter {
     const rows = this.rows;
     const latest = this.latest;
     const tallies = this.tallies;
+    const usage = this.usage;
     this.rows = [];
     this.latest = new Map();
     this.tallies = new Map();
+    this.usage = new Map();
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
     }
 
-    this.flushing = this.write(rows, latest, tallies).finally(() => {
+    this.flushing = this.write(rows, latest, tallies, usage).finally(() => {
       this.flushing = null;
       if (this.rows.length > 0 || this.tallies.size > 0) this.schedule();
     });
@@ -127,12 +139,15 @@ export class TelemetryWriter {
     rows: PendingRow[],
     latest: Map<string, PendingRow>,
     tallies: Map<string, DeviceTally>,
+    usage: Map<string, number>,
   ): Promise<void> {
     const pool = getPool();
     const client = await pool.connect();
     // Published only after COMMIT — the panel must never be told about presence
     // that a rollback then discards.
     let statusEvents: StatusEvent[] = [];
+    // Usage is only counted for telemetry that actually landed.
+    let committed = false;
     try {
       await client.query('BEGIN');
 
@@ -227,6 +242,7 @@ export class TelemetryWriter {
       }
 
       await client.query('COMMIT');
+      committed = true;
       this.writtenRows += rows.length;
     } catch (err) {
       await client.query('ROLLBACK').catch(() => undefined);
@@ -235,6 +251,28 @@ export class TelemetryWriter {
       log.error({ err: (err as Error).message, rows: rows.length }, 'telemetry flush failed');
     } finally {
       client.release();
+    }
+
+    // Monthly quota. Deliberately after COMMIT and outside the transaction: the
+    // telemetry is already safely stored, and a counter that fails to update is a
+    // billing inaccuracy, not lost data.
+    if (committed && usage.size > 0) {
+      try {
+        const outcomes = await recordUsage(usage);
+        for (const outcome of outcomes) {
+          if (outcome.justBlocked) {
+            log.warn(
+              { userId: outcome.userId, datapoints: outcome.datapoints, limit: outcome.limit },
+              'monthly data limit reached — telemetry paused until next month',
+            );
+          }
+          if (this.quotaRedis && (outcome.justBlocked || outcome.over)) {
+            await setOverQuota(this.quotaRedis, outcome.userId, true);
+          }
+        }
+      } catch (err) {
+        log.error({ err: (err as Error).message }, 'usage accounting failed');
+      }
     }
 
     // Outside the try/finally so the connection is already back in the pool, and
