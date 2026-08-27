@@ -94,9 +94,27 @@ export interface Plan {
   name: string;
   maxDevices: number;
   maxVariablesPerDevice: number;
+  maxVariablesTotal: number;
+  maxDashboards: number;
+  maxUsers: number;
   retentionDays: number;
   minIntervalS: number;
+  /** Telemetry rows this plan may write per calendar month. */
+  monthlyDatapoints: number;
+  publicAccess: boolean;
+  mobileApp: boolean;
   priceCents: number;
+}
+
+/** The current month's data allowance, from GET /account/usage. */
+export interface MonthlyUsage {
+  month: string;
+  datapoints: number;
+  limit: number;
+  /** 0–1, already capped so a meter cannot overflow. */
+  fraction: number;
+  warned: boolean;
+  blocked: boolean;
 }
 
 export interface User {

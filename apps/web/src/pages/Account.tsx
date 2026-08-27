@@ -2,14 +2,22 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, KeyRound, Plus, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
-import { api, ApiError, type Plan } from '../lib/api';
+import { api, ApiError, type MonthlyUsage, type Plan } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { formatCount, relativeTime } from '../lib/format';
 import { Alert, Button, Card, CopyField, Field, Input, Modal, SectionTitle, Spinner } from '../components/ui';
 
 interface UsageResponse {
   plan: Plan;
-  usage: { devices: number; devicesOnline: number; variables: number; messages: number; points: number };
+  usage: {
+    devices: number;
+    devicesOnline: number;
+    variables: number;
+    dashboards: number;
+    messages: number;
+    points: number;
+  };
+  month: MonthlyUsage;
 }
 
 interface ApiKey {
@@ -62,9 +70,17 @@ export function AccountPage() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="Devices" value={`${usage?.usage.devices ?? 0} / ${usage?.plan.maxDevices ?? '—'}`} />
         <Metric label="Online now" value={String(usage?.usage.devicesOnline ?? 0)} />
-        <Metric label="Variables" value={String(usage?.usage.variables ?? 0)} />
-        <Metric label="Datapoints stored" value={formatCount(usage?.usage.points ?? 0)} />
+        <Metric
+          label="Variables"
+          value={`${usage?.usage.variables ?? 0} / ${usage?.plan.maxVariablesTotal ?? '—'}`}
+        />
+        <Metric
+          label="Dashboards"
+          value={`${usage?.usage.dashboards ?? 0} / ${usage?.plan.maxDashboards ?? '—'}`}
+        />
       </div>
+
+      {usage?.month && <MonthlyMeter month={usage.month} />}
 
       <Card>
         <SectionTitle
@@ -97,15 +113,17 @@ export function AccountPage() {
                 <ul className="mt-3 space-y-1.5 text-xs text-slate-400">
                   <li>{plan.maxDevices} devices</li>
                   <li>{plan.maxVariablesPerDevice} variables per device</li>
+                  <li>{formatCount(plan.monthlyDatapoints)} datapoints per month</li>
                   <li>{plan.retentionDays} days of history</li>
                   <li>{plan.minIntervalS}s minimum interval</li>
+                  <li>{plan.maxDashboards} dashboards</li>
                 </ul>
               </div>
             );
           })}
         </div>
         <p className="mt-4 text-xs text-slate-500">
-          Billing is not enabled in this phase — every account runs on the free plan. The limits above are already
+          Billing is not enabled yet — every account runs on the free plan until payments go live. The limits above are already
           enforced end to end, so switching a user to a paid tier is a single field change.
         </p>
       </Card>
@@ -197,6 +215,58 @@ export function AccountPage() {
 
       <PasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
     </div>
+  );
+}
+
+/**
+ * The month's data allowance.
+ *
+ * The bar exists so nobody meets the limit as a surprise: the warning at 80% is
+ * recorded server-side, but a number on the page is what actually gets noticed.
+ */
+function MonthlyMeter({ month }: { month: MonthlyUsage }) {
+  const percent = Math.round(month.fraction * 100);
+  const tone = month.blocked ? 'bg-rose-500' : month.warned ? 'bg-amber-400' : 'bg-cyan-400';
+
+  return (
+    <Card>
+      <SectionTitle
+        title="Data this month"
+        subtitle="Resets on the first of each month. Stored history is never affected."
+      />
+
+      <div className="flex items-baseline justify-between text-sm">
+        <span className="font-mono text-2xl font-semibold text-white">
+          {formatCount(month.datapoints)}
+        </span>
+        <span className="text-slate-400">of {formatCount(month.limit)} datapoints</span>
+      </div>
+
+      <div className="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-slate-800">
+        <div
+          className={clsx('h-full rounded-full transition-all duration-500', tone)}
+          style={{ width: `${Math.max(percent, month.datapoints > 0 ? 2 : 0)}%` }}
+        />
+      </div>
+      <p className="mt-2 text-xs text-slate-500">{percent}% used</p>
+
+      {month.blocked ? (
+        <div className="mt-4">
+          <Alert>
+            You have reached this month's data limit, so new readings are not being stored until the
+            first of next month. Everything already stored is still here, and the panel keeps working
+            normally. Upgrading raises the limit immediately.
+          </Alert>
+        </div>
+      ) : month.warned ? (
+        <div className="mt-4">
+          <Alert tone="amber">
+            You have used more than 80% of this month's data. At 100% new readings stop being stored
+            until the month resets — nothing already stored is lost.
+          </Alert>
+        </div>
+      ) : null}
+    </Card>
   );
 }
 
