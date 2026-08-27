@@ -15,6 +15,7 @@ import {
   ensureServiceAccount,
   env,
   listenForInvalidation,
+  paypal,
   runMigrations,
   waitForDatabase,
 } from '@pulse/core';
@@ -25,6 +26,7 @@ import { attachRealtime } from './realtime.js';
 import { accountRoutes } from './routes/account.js';
 import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
+import { billingRoutes } from './routes/billing.js';
 import { dashboardRoutes } from './routes/dashboards.js';
 import { deviceRoutes } from './routes/devices.js';
 import { exportRoutes } from './routes/export.js';
@@ -40,6 +42,17 @@ async function main() {
   // idempotent and guarded by the _migrations table, so concurrent replicas are safe.
   await runMigrations();
   await ensureServiceAccount();
+
+  // Publish the billing plans to PayPal if they are not there yet. Idempotent —
+  // a price row that already carries a provider_plan_id is skipped — and
+  // deliberately not awaited: a PayPal outage must not stop the API booting,
+  // and the subscribe route already refuses a plan that has no provider id.
+  void paypal
+    .syncPlans()
+    .then(({ created, skipped }) => {
+      if (created > 0) log.info({ created, skipped }, 'billing plans published to PayPal');
+    })
+    .catch((err) => log.error({ err: err.message }, 'could not publish billing plans'));
 
   const redis = createRedis('api');
   const mqtt = connectMqtt('pulse-api');
@@ -107,6 +120,7 @@ async function main() {
       await v1.register(telemetryRoutes);
       await v1.register(exportRoutes);
       await v1.register(accountRoutes);
+      await v1.register(billingRoutes);
       await v1.register(adminRoutes);
       await v1.register(ingestRoutes);
     },

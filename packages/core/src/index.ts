@@ -12,3 +12,4 @@ export * from './ingest/engine.js';
 export * from './ingest/presence.js';
 export * from './plans.js';
 export * from './usage.js';
+export * as paypal from './billing/paypal.js';

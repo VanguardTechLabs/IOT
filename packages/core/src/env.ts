@@ -33,6 +33,16 @@ const schema = z.object({
   MQTT_BACKEND_PASSWORD: z.string().min(6, 'MQTT_BACKEND_PASSWORD must be at least 6 chars'),
 
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 chars'),
+
+  // ── Billing ────────────────────────────────────────────────────────────
+  // Optional: the platform runs perfectly well with payments switched off, and
+  // did for the whole of phase 1. Every billing route checks for these and
+  // returns a clear "billing is not configured" rather than crashing on boot.
+  PAYPAL_ENV: z.enum(['sandbox', 'live']).default('sandbox'),
+  PAYPAL_CLIENT_ID: z.string().optional().default(''),
+  PAYPAL_SECRET: z.string().optional().default(''),
+  /** Set after registering the webhook with PayPal; signature checks need it. */
+  PAYPAL_WEBHOOK_ID: z.string().optional().default(''),
   ACCESS_TOKEN_TTL: z.string().default('15m'),
   REFRESH_TOKEN_TTL_DAYS: int(30),
   COOKIE_SECURE: bool(false),
