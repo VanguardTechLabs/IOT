@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { and, asc, eq, inArray } from 'drizzle-orm';
-import { db, tables } from '@pulse/core';
+import { assertCanAddDashboard, db, tables } from '@pulse/core';
 import { badRequest, notFound, parse, uuidParam } from '../lib/http.js';
 
 /**
@@ -193,6 +193,9 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
   app.post('/dashboards', async (req, reply) => {
     const auth = await app.requireAuth(req);
     const body = parse(createDashboardSchema, req.body);
+
+    // Throws a 402 with the plan's own wording when the tier's ceiling is reached.
+    await assertCanAddDashboard(auth.id);
 
     // A device-scoped dashboard must point at a device the caller owns.
     if (body.deviceId) {

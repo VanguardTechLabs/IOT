@@ -1,6 +1,7 @@
 import {
   bigint,
   boolean,
+  date,
   doublePrecision,
   index,
   integer,
@@ -20,12 +21,40 @@ export const plans = pgTable('plans', {
   name: text('name').notNull(),
   maxDevices: integer('max_devices').notNull(),
   maxVariablesPerDevice: integer('max_variables_per_device').notNull(),
+  maxVariablesTotal: integer('max_variables_total').notNull().default(100),
+  maxDashboards: integer('max_dashboards').notNull().default(5),
+  maxUsers: integer('max_users').notNull().default(1),
   retentionDays: integer('retention_days').notNull(),
   minIntervalS: integer('min_interval_s').notNull(),
+  /** Telemetry rows this plan may write per calendar month. */
+  monthlyDatapoints: bigint('monthly_datapoints', { mode: 'number' }).notNull().default(1_000_000),
+  publicAccess: boolean('public_access').notNull().default(false),
+  mobileApp: boolean('mobile_app').notNull().default(false),
+  /** The monthly headline price. Per-period prices live in plan_prices. */
   priceCents: integer('price_cents').notNull().default(0),
   sortOrder: integer('sort_order').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** One price per (plan, billing period). A tier has monthly, quarterly and annual. */
+export const planPrices = pgTable(
+  'plan_prices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    planId: text('plan_id')
+      .notNull()
+      .references(() => plans.id, { onDelete: 'cascade' }),
+    /** 'month' | 'quarter' | 'year' */
+    period: text('period').notNull(),
+    priceCents: integer('price_cents').notNull(),
+    provider: text('provider').notNull().default('paypal'),
+    /** The provider's own id for this price. Null until created provider-side. */
+    providerPlanId: text('provider_plan_id'),
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('plan_prices_unique_idx').on(t.planId, t.period, t.provider)],
+);
 
 export const users = pgTable(
   'users',
@@ -253,6 +282,93 @@ export const widgets = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('widgets_dashboard_idx').on(t.dashboardId), index('widgets_variable_idx').on(t.variableId)],
+);
+
+export const subscriptions = pgTable(
+  'subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    planId: text('plan_id')
+      .notNull()
+      .references(() => plans.id),
+    period: text('period').notNull(),
+    provider: text('provider').notNull().default('paypal'),
+    providerRef: text('provider_ref').notNull(),
+    /** pending | active | past_due | cancelled | expired */
+    status: text('status').notNull(),
+    /** A cancellation is honoured to this date rather than taking access away at once. */
+    currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+    cancelAtPeriodEnd: boolean('cancel_at_period_end').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('subscriptions_provider_ref_idx').on(t.provider, t.providerRef),
+    index('subscriptions_user_idx').on(t.userId, t.status),
+  ],
+);
+
+export const payments = pgTable(
+  'payments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    subscriptionId: uuid('subscription_id').references(() => subscriptions.id, { onDelete: 'set null' }),
+    provider: text('provider').notNull().default('paypal'),
+    providerRef: text('provider_ref').notNull(),
+    amountCents: integer('amount_cents').notNull(),
+    currency: text('currency').notNull().default('USD'),
+    status: text('status').notNull(),
+    paidAt: timestamp('paid_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('payments_provider_ref_idx').on(t.provider, t.providerRef),
+    index('payments_user_idx').on(t.userId, t.paidAt),
+  ],
+);
+
+/**
+ * Webhook events already handled. Providers deliver at-least-once and retry on
+ * any non-2xx, so checking this first is what makes the handler idempotent.
+ */
+export const billingEvents = pgTable(
+  'billing_events',
+  {
+    provider: text('provider').notNull(),
+    eventId: text('event_id').notNull(),
+    eventType: text('event_type').notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.provider, t.eventId] })],
+);
+
+/**
+ * Telemetry rows written per user per calendar month.
+ *
+ * Counted rather than derived: the quota check runs on every uplink, and a
+ * COUNT(*) over a month of a busy account is far too slow for the ingest path.
+ */
+export const usageCounters = pgTable(
+  'usage_counters',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** First day of the month, UTC. */
+    month: date('month').notNull(),
+    datapoints: bigint('datapoints', { mode: 'number' }).notNull().default(0),
+    /** Set once, so the 80% warning is not re-sent on every subsequent uplink. */
+    warnedAt: timestamp('warned_at', { withTimezone: true }),
+    blockedAt: timestamp('blocked_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.month] })],
 );
 
 /** Broker credentials for the API/ingest services (EMQX superusers). */
