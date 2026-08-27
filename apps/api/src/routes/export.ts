@@ -23,6 +23,13 @@ const exportSchema = z.object({
    * exactly one row per cycle rather than a sparse grid.
    */
   format: z.enum(['wide', 'long']).optional().default('wide'),
+  /**
+   * Include the commands sent from the panel alongside the telemetry received
+   * from the device: one file, ordered by time, with a `direction` column
+   * saying which each row is. You can see an order go out and the reading that
+   * followed it on the next line.
+   */
+  commands: z.enum(['true', 'false']).optional().default('true'),
 });
 
 /** Renders a stored value back to its wire form, whatever the declared type. */
@@ -110,6 +117,14 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     const tz = isValidTimeZone(device.timezone) ? device.timezone : 'UTC';
 
     const idList = ids.map((v) => `'${v}'::uuid`).join(',');
+    const deviceLiteral = `'${assertUuid(id)}'::uuid`;
+    const withCommands = query.commands !== 'false';
+
+    const commandWhere = `
+         WHERE c.device_id = ${deviceLiteral}
+           AND c.variable_id IN (${idList})
+           AND c.created_at >= '${fromIso}'::timestamptz
+           AND c.created_at <= '${toIso}'::timestamptz`;
     const where = `
          WHERE t.device_id = '${assertUuid(id)}'::uuid
            AND t.variable_id IN (${idList})
@@ -123,13 +138,41 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
       .map((v) => `               max(CASE WHEN t.variable_id = '${v.id}'::uuid THEN ${VALUE_EXPR} END) AS ${quoteIdent(csvColumnName(v.key))}`)
       .join(',\n');
 
+    // The same columns, filled from the commands table. Values are already text
+    // there — a downlink is a string by definition — so no casting is needed.
+    const commandPivot = columns
+      .map(
+        (v) =>
+          `               max(CASE WHEN c.variable_id = '${v.id}'::uuid THEN c.value END) AS ${quoteIdent(csvColumnName(v.key))}`,
+      )
+      .join(',\n');
+
+    // A command carries one variable, so grouping by its timestamp yields a row
+    // with a single populated column — which is exactly how it should read.
+    const commandBranch = withCommands
+      ? `
+        UNION ALL
+        SELECT c.created_at AS ts,
+               'sent'       AS direction,
+${commandPivot}
+          FROM commands c
+          ${commandWhere}
+         GROUP BY c.created_at`
+      : '';
+
+    // Header order: the fixed columns first, then one per variable.
+    const columnList = columns
+      .map((v) => quoteIdent(csvColumnName(v.key)))
+      .join(', ');
+
     const sql =
       query.format === 'long'
         ? `
       COPY (
         SELECT to_char(t.ts AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS timestamp_utc,
                to_char(t.ts AT TIME ZONE '${tz}', 'YYYY-MM-DD HH24:MI:SS')        AS timestamp_local,
-               '${tz}'  AS timezone,
+               '${tz}'   AS timezone,
+               'received' AS direction,
                v.key    AS variable,
                v.label  AS label,
                v.unit   AS unit,
@@ -142,15 +185,21 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     `
         : `
       COPY (
-        SELECT to_char(t.ts AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS timestamp_utc,
-               to_char(t.ts AT TIME ZONE '${tz}', 'YYYY-MM-DD HH24:MI:SS')        AS timestamp_local,
-               '${tz}'  AS timezone,
+        SELECT to_char(merged.ts AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS timestamp_utc,
+               to_char(merged.ts AT TIME ZONE '${tz}', 'YYYY-MM-DD HH24:MI:SS')        AS timestamp_local,
+               '${tz}'   AS timezone,
+               merged.direction,
+               ${columnList}
+          FROM (
+        SELECT t.ts       AS ts,
+               'received' AS direction,
 ${pivot}
           FROM telemetry t
           JOIN variables v ON v.id = t.variable_id
           ${where}
-         GROUP BY t.ts
-         ORDER BY t.ts
+         GROUP BY t.ts${commandBranch}
+          ) merged
+         ORDER BY merged.ts
       ) TO STDOUT WITH (FORMAT csv, HEADER true)
     `;
 
