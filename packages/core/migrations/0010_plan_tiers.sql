@@ -21,18 +21,19 @@ ALTER TABLE plans ADD COLUMN IF NOT EXISTS public_access       boolean NOT NULL 
 ALTER TABLE plans ADD COLUMN IF NOT EXISTS mobile_app          boolean NOT NULL DEFAULT false;
 
 -- ── Tiers ────────────────────────────────────────────────────────────────────
--- Note the min_interval_s spread. In 0001 every paid tier allowed 1s and free
--- allowed 3s, which gave nobody a reason to upgrade. Reporting speed is now the
--- clearest difference between the tiers.
+-- Every tier allows 5s. Reporting speed was briefly used to separate the tiers,
+-- but a plan advertising a 60s floor reads as a capability being withheld, and
+-- most trial users send few enough variables that it is an arbitrary handicap.
+-- The monthly allowance is the lever instead — see 0012 for the reasoning.
 
 INSERT INTO plans (
   id, name, max_devices, max_variables_per_device, max_variables_total,
   retention_days, min_interval_s, monthly_datapoints, max_dashboards, max_users,
   public_access, mobile_app, price_cents, sort_order
 ) VALUES
-  ('free',    'Free',     2, 15,  30, 30, 60,  1000000,  2, 1, false, false,    0, 0),
-  ('starter', 'Starter', 10, 20, 200, 60, 15,  5000000, 10, 2, true,  true,   900, 1),
-  ('pro',     'Pro',     15, 30, 450, 90,  5, 15000000, 15, 5, true,  true,  1500, 2)
+  ('free',    'Free',     2, 15,  30, 30, 5,   500000,  2, 1, false, false,    0, 0),
+  ('starter', 'Starter', 10, 20, 200, 60, 5,  5000000, 10, 2, true,  true,   900, 1),
+  ('pro',     'Pro',     15, 30, 450, 90, 5, 15000000, 15, 5, true,  true,  1500, 2)
 ON CONFLICT (id) DO UPDATE SET
   name                     = EXCLUDED.name,
   max_devices              = EXCLUDED.max_devices,
