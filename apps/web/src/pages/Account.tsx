@@ -2,7 +2,14 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, KeyRound, Plus, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
-import { api, ApiError, type MonthlyUsage, type Plan } from '../lib/api';
+import {
+  api,
+  ApiError,
+  type BillingPeriod,
+  type BillingStatus,
+  type MonthlyUsage,
+  type Plan,
+} from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { formatCount, relativeTime } from '../lib/format';
 import { Alert, Button, Card, CopyField, Field, Input, Modal, SectionTitle, Spinner } from '../components/ui';
@@ -37,6 +44,33 @@ export function AccountPage() {
   const [passwordOpen, setPasswordOpen] = useState(false);
 
   const usageQuery = useQuery({ queryKey: ['usage'], queryFn: () => api.get<UsageResponse>('/account/usage') });
+  const billingQuery = useQuery({
+    queryKey: ['billing'],
+    queryFn: () => api.get<BillingStatus>('/billing/status'),
+  });
+  const [period, setPeriod] = useState<BillingPeriod>('month');
+  const [billingError, setBillingError] = useState<string | null>(null);
+
+  const subscribe = useMutation({
+    mutationFn: (planId: string) =>
+      api.post<{ approvalUrl: string }>('/billing/subscribe', { planId, period }),
+    // PayPal owns the payment page; the browser leaves the app entirely and comes
+    // back through the return URL. The plan itself only changes when PayPal calls
+    // the webhook, never on the redirect.
+    onSuccess: (data) => window.location.assign(data.approvalUrl),
+    onError: (err) =>
+      setBillingError(err instanceof ApiError ? err.message : 'Could not start the checkout'),
+  });
+
+  const cancelSubscription = useMutation({
+    mutationFn: () => api.post('/billing/cancel'),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['billing'] });
+      void queryClient.invalidateQueries({ queryKey: ['usage'] });
+    },
+    onError: (err) =>
+      setBillingError(err instanceof ApiError ? err.message : 'Could not cancel the subscription'),
+  });
   const plansQuery = useQuery({ queryKey: ['plans'], queryFn: () => api.get<{ plans: Plan[] }>('/plans') });
   const keysQuery = useQuery({ queryKey: ['api-keys'], queryFn: () => api.get<{ apiKeys: ApiKey[] }>('/account/api-keys') });
 
@@ -57,6 +91,7 @@ export function AccountPage() {
 
   if (usageQuery.isLoading) return <Spinner />;
   const usage = usageQuery.data;
+  const billing = billingQuery.data;
 
   return (
     <div className="space-y-6">
@@ -87,9 +122,61 @@ export function AccountPage() {
           title="Plan"
           subtitle={`You are on ${usage?.plan.name}. Retention is ${usage?.plan.retentionDays} days and the minimum reporting interval is ${usage?.plan.minIntervalS}s.`}
         />
+        {billingError && (
+          <div className="mb-4">
+            <Alert>{billingError}</Alert>
+          </div>
+        )}
+
+        {billing?.subscription && billing.subscription.status !== 'expired' && (
+          <div className="mb-4">
+            <Alert tone={billing.subscription.status === 'past_due' ? 'amber' : 'cyan'}>
+              {billing.subscription.status === 'pending' &&
+                'Your subscription is waiting for PayPal to confirm the first payment. It activates automatically.'}
+              {billing.subscription.status === 'active' &&
+                (billing.subscription.cancelAtPeriodEnd
+                  ? 'Your subscription is cancelled and will not renew. You keep this plan until the end of the paid period.'
+                  : `Subscribed on the ${billing.subscription.period}ly plan.`)}
+              {billing.subscription.status === 'past_due' &&
+                'A payment did not go through. PayPal will retry — your plan is unchanged in the meantime.'}
+              {billing.subscription.status === 'cancelled' &&
+                'Your subscription has been cancelled.'}
+              {billing.subscription.status === 'active' && !billing.subscription.cancelAtPeriodEnd && (
+                <button
+                  className="ml-2 underline underline-offset-2"
+                  onClick={() => cancelSubscription.mutate()}
+                >
+                  Cancel subscription
+                </button>
+              )}
+            </Alert>
+          </div>
+        )}
+
+        {billing?.configured && (
+          <div className="mb-5 flex items-center gap-2">
+            <span className="text-xs uppercase tracking-wide text-slate-500">Billed</span>
+            {(['month', 'quarter', 'year'] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={clsx(
+                  'rounded-lg px-3 py-1.5 text-xs font-medium transition',
+                  period === p
+                    ? 'bg-cyan-500/15 text-cyan-300 ring-1 ring-cyan-500/30'
+                    : 'text-slate-400 hover:text-white',
+                )}
+              >
+                {p === 'month' ? 'Monthly' : p === 'quarter' ? '3 months −10%' : 'Yearly −20%'}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="grid gap-4 md:grid-cols-3">
           {(plansQuery.data?.plans ?? []).map((plan) => {
             const current = plan.id === usage?.plan.id;
+            const price = billing?.prices.find((p) => p.planId === plan.id && p.period === period);
             return (
               <div
                 key={plan.id}
@@ -107,8 +194,14 @@ export function AccountPage() {
                   )}
                 </div>
                 <p className="mt-2 font-mono text-lg text-slate-200">
-                  {plan.priceCents === 0 ? 'Free' : `$${(plan.priceCents / 100).toFixed(0)}`}
-                  {plan.priceCents > 0 && <span className="text-xs text-slate-500"> /mo</span>}
+                  {plan.priceCents === 0
+                    ? 'Free'
+                    : `${((price?.priceCents ?? plan.priceCents) / 100).toFixed(2)}`}
+                  {plan.priceCents > 0 && (
+                    <span className="text-xs text-slate-500">
+                      {period === 'month' ? ' /mo' : period === 'quarter' ? ' /3 mo' : ' /year'}
+                    </span>
+                  )}
                 </p>
                 <ul className="mt-3 space-y-1.5 text-xs text-slate-400">
                   <li>{plan.maxDevices} devices</li>
@@ -118,14 +211,44 @@ export function AccountPage() {
                   <li>{plan.minIntervalS}s minimum interval</li>
                   <li>{plan.maxDashboards} dashboards</li>
                 </ul>
+
+                {billing?.configured && !current && plan.priceCents > 0 && (
+                  <Button
+                    className="mt-4 w-full"
+                    loading={subscribe.isPending}
+                    // A plan with no provider id has not been published to PayPal,
+                    // so a checkout would fail at the last step. Better greyed out.
+                    disabled={!price?.ready}
+                    title={!price?.ready ? 'This plan is not available for checkout yet' : undefined}
+                    onClick={() => {
+                      setBillingError(null);
+                      subscribe.mutate(plan.id);
+                    }}
+                  >
+                    Upgrade
+                  </Button>
+                )}
               </div>
             );
           })}
         </div>
-        <p className="mt-4 text-xs text-slate-500">
-          Billing is not enabled yet — every account runs on the free plan until payments go live. The limits above are already
-          enforced end to end, so switching a user to a paid tier is a single field change.
-        </p>
+
+        {!billing?.configured ? (
+          <p className="mt-4 text-xs text-slate-500">
+            Billing is not enabled on this deployment — every account runs on its current plan. The limits
+            above are already enforced end to end.
+          </p>
+        ) : billing.environment === 'sandbox' ? (
+          <p className="mt-4 text-xs text-amber-400/80">
+            Payments are running against PayPal's <strong>sandbox</strong>. Checkout uses test money and
+            no real payment is taken.
+          </p>
+        ) : (
+          <p className="mt-4 text-xs text-slate-500">
+            Payments are handled by PayPal. Your plan changes once PayPal confirms the payment, which is
+            usually immediate.
+          </p>
+        )}
       </Card>
 
       <Card>

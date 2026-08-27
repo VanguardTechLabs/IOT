@@ -106,6 +106,33 @@ export interface Plan {
   priceCents: number;
 }
 
+export type BillingPeriod = 'month' | 'quarter' | 'year';
+
+export interface PlanPrice {
+  planId: string;
+  period: BillingPeriod;
+  priceCents: number;
+  /** False until the plan exists on the provider's side — checkout would fail. */
+  ready: boolean;
+}
+
+export interface Subscription {
+  id: string;
+  planId: string;
+  period: BillingPeriod;
+  status: 'pending' | 'active' | 'past_due' | 'cancelled' | 'expired';
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+}
+
+export interface BillingStatus {
+  configured: boolean;
+  environment: 'sandbox' | 'live';
+  plans: Plan[];
+  prices: PlanPrice[];
+  subscription: Subscription | null;
+}
+
 /** The current month's data allowance, from GET /account/usage. */
 export interface MonthlyUsage {
   month: string;
