@@ -107,13 +107,19 @@ export async function syncPlans(): Promise<{ created: number; skipped: number }>
       period: planPrices.period,
       priceCents: planPrices.priceCents,
       providerPlanId: planPrices.providerPlanId,
+      providerEnv: planPrices.providerEnv,
       planName: plans.name,
     })
     .from(planPrices)
     .innerJoin(plans, eq(plans.id, planPrices.planId))
     .where(and(eq(planPrices.provider, 'paypal'), eq(planPrices.active, true)));
 
-  const pending = rows.filter((r) => !r.providerPlanId && r.priceCents > 0);
+  // A row published to a DIFFERENT environment counts as unpublished. Sandbox
+  // ids are worthless once live credentials are in place, and the failure they
+  // cause otherwise is invisible until a customer reaches PayPal's last screen.
+  const pending = rows.filter(
+    (r) => r.priceCents > 0 && (!r.providerPlanId || r.providerEnv !== env.PAYPAL_ENV),
+  );
   if (pending.length === 0) return { created: 0, skipped: rows.length };
 
   const product = await api<{ id: string }>('/v1/catalogs/products', {
@@ -162,7 +168,7 @@ export async function syncPlans(): Promise<{ created: number; skipped: number }>
 
     await db
       .update(planPrices)
-      .set({ providerPlanId: plan.id })
+      .set({ providerPlanId: plan.id, providerEnv: env.PAYPAL_ENV })
       .where(eq(planPrices.id, row.id));
 
     created += 1;

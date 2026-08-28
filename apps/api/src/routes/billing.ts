@@ -39,6 +39,7 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
         period: tables.planPrices.period,
         priceCents: tables.planPrices.priceCents,
         ready: tables.planPrices.providerPlanId,
+        readyEnv: tables.planPrices.providerEnv,
       })
       .from(tables.planPrices)
       .where(and(eq(tables.planPrices.provider, 'paypal'), eq(tables.planPrices.active, true)));
@@ -68,9 +69,13 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
       configured: paypal.billingConfigured(),
       environment: env.PAYPAL_ENV,
       plans: await listPlans(),
-      // `ready` is null until the plan exists on PayPal's side; the UI disables
-      // those buttons rather than starting a checkout that cannot complete.
-      prices: prices.map((p) => ({ ...p, ready: p.ready !== null })),
+      // A price is offerable only once it exists on PayPal's side AND in the
+      // environment we are pointed at — a sandbox id is not a live plan. The UI
+      // disables the rest rather than starting a checkout that cannot complete.
+      prices: prices.map(({ readyEnv, ...p }) => ({
+        ...p,
+        ready: p.ready !== null && readyEnv === env.PAYPAL_ENV,
+      })),
       subscription: subscription ?? null,
     };
   });
@@ -84,7 +89,10 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const [price] = await db
-      .select({ providerPlanId: tables.planPrices.providerPlanId })
+      .select({
+        providerPlanId: tables.planPrices.providerPlanId,
+        providerEnv: tables.planPrices.providerEnv,
+      })
       .from(tables.planPrices)
       .where(
         and(
@@ -97,7 +105,7 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
       .limit(1);
 
     if (!price) throw notFound('No such plan and billing period');
-    if (!price.providerPlanId) {
+    if (!price.providerPlanId || price.providerEnv !== env.PAYPAL_ENV) {
       throw badRequest('This plan has not been published to PayPal yet — try again shortly');
     }
 

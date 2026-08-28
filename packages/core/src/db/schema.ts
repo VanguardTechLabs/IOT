@@ -50,6 +50,8 @@ export const planPrices = pgTable(
     provider: text('provider').notNull().default('paypal'),
     /** The provider's own id for this price. Null until created provider-side. */
     providerPlanId: text('provider_plan_id'),
+    /** Which provider environment that id belongs to — 'sandbox' or 'live'. */
+    providerEnv: text('provider_env'),
     active: boolean('active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
