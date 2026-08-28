@@ -141,6 +141,13 @@ services:
       INGEST_BURST_LIMIT: ${INGEST_BURST_LIMIT:-30}
       INGEST_BURST_WINDOW_S: ${INGEST_BURST_WINDOW_S:-3}
       TELEMETRY_RETENTION_DAYS: ${TELEMETRY_RETENTION_DAYS:-30}
+      # Compose reads .env for interpolation only — a variable sitting in that
+      # file does not reach a container unless it is named here. Left out, the
+      # API silently decides billing is unconfigured and skips the plan sync.
+      PAYPAL_ENV: ${PAYPAL_ENV:-sandbox}
+      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
+      PAYPAL_SECRET: ${PAYPAL_SECRET:-}
+      PAYPAL_WEBHOOK_ID: ${PAYPAL_WEBHOOK_ID:-}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s

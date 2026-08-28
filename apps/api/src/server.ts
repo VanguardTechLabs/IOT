@@ -47,12 +47,24 @@ async function main() {
   // a price row that already carries a provider_plan_id is skipped — and
   // deliberately not awaited: a PayPal outage must not stop the API booting,
   // and the subscribe route already refuses a plan that has no provider id.
-  void paypal
-    .syncPlans()
-    .then(({ created, skipped }) => {
-      if (created > 0) log.info({ created, skipped }, 'billing plans published to PayPal');
-    })
-    .catch((err) => log.error({ err: err.message }, 'could not publish billing plans'));
+  // Say so out loud either way. Billing silently deciding it is unconfigured is
+  // exactly the failure that hides a missing variable until a customer cannot pay.
+  if (!paypal.billingConfigured()) {
+    log.warn(
+      { env: env.PAYPAL_ENV },
+      'billing disabled: PAYPAL_CLIENT_ID/PAYPAL_SECRET are empty in the API container',
+    );
+  } else {
+    if (!env.PAYPAL_WEBHOOK_ID) {
+      log.warn('PAYPAL_WEBHOOK_ID is empty — webhooks will be refused, so plans will never activate');
+    }
+    void paypal
+      .syncPlans()
+      .then(({ created, skipped }) =>
+        log.info({ created, skipped, env: env.PAYPAL_ENV }, 'billing plans synced with PayPal'),
+      )
+      .catch((err) => log.error({ err: err.message }, 'could not publish billing plans'));
+  }
 
   const redis = createRedis('api');
   const mqtt = connectMqtt('pulse-api');
