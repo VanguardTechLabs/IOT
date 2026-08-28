@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { db, env, listPlans, paypal, tables } from '@pulse/core';
 import { badRequest, notFound, parse } from '../lib/http.js';
 
@@ -54,7 +54,14 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
       })
       .from(tables.subscriptions)
       .where(eq(tables.subscriptions.userId, auth.id))
-      .orderBy(desc(tables.subscriptions.createdAt))
+      // A live subscription outranks a newer abandoned one. Clicking Upgrade
+      // twice and approving the first leaves a pending row with the later
+      // timestamp; sorting on time alone would report that one and tell a
+      // paying customer their payment is still being processed.
+      .orderBy(
+        sql`CASE WHEN status IN ('active', 'past_due') THEN 0 WHEN status = 'pending' THEN 1 ELSE 2 END`,
+        desc(tables.subscriptions.createdAt),
+      )
       .limit(1);
 
     return {
@@ -122,6 +129,7 @@ export const billingRoutes: FastifyPluginAsync = async (app) => {
       .select({ id: tables.subscriptions.id, providerRef: tables.subscriptions.providerRef })
       .from(tables.subscriptions)
       .where(and(eq(tables.subscriptions.userId, auth.id), eq(tables.subscriptions.status, 'active')))
+      .orderBy(desc(tables.subscriptions.createdAt))
       .limit(1);
 
     if (!subscription) throw notFound('You have no active subscription');
