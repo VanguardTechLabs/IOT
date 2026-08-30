@@ -38,7 +38,12 @@
       ]
     ],
     "extra": {
-      "apiUrl": "https://vmi3520387.contaboserver.net"
-    }
+      "apiUrl": "https://vmi3520387.contaboserver.net",
+      "router": {},
+      "eas": {
+        "projectId": "15d50a35-45dd-4794-95d7-ce92a5e0ecae"
+      }
+    },
+    "owner": "kanarihirosi"
   }
 }
