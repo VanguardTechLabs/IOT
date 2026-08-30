@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { api, type Device, type VariableState } from '../../src/api';
+import { api, type Device, type VariableState, type WidgetType } from '../../src/api';
 import { Card, Dot, Empty, Loading, Note } from '../../src/components/ui';
 import { Widget } from '../../src/components/Widget';
 import { getSocket, type StatusEvent, type TelemetryEvent } from '../../src/socket';
@@ -164,13 +164,17 @@ function VariableRow({
   writing: boolean;
   onWrite: (key: string, value: string) => void;
 }) {
-  const type = row.writable
-    ? row.type === 'boolean'
+  // The database stores int | float | bool | string. Matching on 'boolean' or
+  // 'number' — neither of which exists — sent every variable to the read-only
+  // number widget, so a writable relay rendered as a dash instead of a switch.
+  const numeric = row.type === 'int' || row.type === 'float';
+  const type: WidgetType = row.writable
+    ? row.type === 'bool'
       ? 'toggle'
-      : row.type === 'number'
+      : numeric
         ? 'slider'
         : 'number'
-    : row.type === 'boolean'
+    : row.type === 'bool'
       ? 'led'
       : 'number';
 

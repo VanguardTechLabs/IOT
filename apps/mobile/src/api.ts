@@ -228,13 +228,16 @@ export interface Device {
   variableCount?: number;
 }
 
+export type VariableType = 'int' | 'float' | 'bool' | 'string';
+
 /** A row of GET /devices/:id/state — the variable and its newest value. */
 export interface VariableState {
   variableId: string;
   key: string;
   label: string | null;
   unit: string | null;
-  type: 'number' | 'boolean' | 'string';
+  /** The four the database allows — not 'number'/'boolean', which never occur. */
+  type: VariableType;
   writable: boolean;
   color: string | null;
   ts: string | null;
