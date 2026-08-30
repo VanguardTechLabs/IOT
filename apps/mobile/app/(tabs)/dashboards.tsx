@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { api, type Dashboard } from '../../src/api';
 import { Empty, Loading, Note } from '../../src/components/ui';
 import { c, radius, space } from '../../src/theme';
 
 export default function Dashboards() {
+  const router = useRouter();
   const query = useQuery({
     queryKey: ['dashboards'],
     queryFn: () => api.get<{ dashboards: Dashboard[] }>('/dashboards'),
@@ -37,21 +38,22 @@ export default function Dashboards() {
         />
       }
       renderItem={({ item }) => (
-        <Link href={{ pathname: '/dashboard/[id]', params: { id: item.id } }} asChild>
-          <Pressable style={({ pressed }) => [s.row, pressed && { opacity: 0.7 }]}>
-            <View style={{ flex: 1, gap: space.xs }}>
-              <Text style={s.name} numberOfLines={1}>
-                {item.name}
-              </Text>
-              <Text style={s.meta}>
-                {item.widgetCount === undefined
-                  ? item.slug
-                  : `${item.widgetCount} ${item.widgetCount === 1 ? 'widget' : 'widgets'}`}
-              </Text>
-            </View>
-            <Text style={s.chev}>›</Text>
-          </Pressable>
-        </Link>
+        <Pressable
+          onPress={() => router.push({ pathname: '/dashboard/[id]', params: { id: item.id } })}
+          style={({ pressed }) => [s.row, pressed && { opacity: 0.7 }]}
+        >
+          <View style={{ flex: 1, gap: space.xs }}>
+            <Text style={s.name} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <Text style={s.meta}>
+              {item.widgetCount === undefined
+                ? item.slug
+                : `${item.widgetCount} ${item.widgetCount === 1 ? 'widget' : 'widgets'}`}
+            </Text>
+          </View>
+          <Text style={s.chev}>›</Text>
+        </Pressable>
       )}
     />
   );

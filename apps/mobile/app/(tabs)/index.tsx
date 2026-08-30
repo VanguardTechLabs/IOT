@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { api, type Device } from '../../src/api';
@@ -19,6 +19,10 @@ function ago(iso: string | null): string {
 
 export default function Devices() {
   const qc = useQueryClient();
+  // Navigating imperatively rather than with <Link asChild>. Link clones its
+  // child and its own props win, which silently dropped the Pressable's style —
+  // the row lost its card entirely and the chevron wrapped to a new line.
+  const router = useRouter();
   const query = useQuery({
     queryKey: ['devices'],
     queryFn: () => api.get<{ devices: Device[] }>('/devices'),
@@ -73,23 +77,24 @@ export default function Devices() {
         />
       }
       renderItem={({ item }) => (
-        <Link href={{ pathname: '/device/[id]', params: { id: item.id } }} asChild>
-          <Pressable style={({ pressed }) => [s.row, pressed && { opacity: 0.7 }]}>
-            <View style={s.rowMain}>
-              <View style={s.rowTitle}>
-                <Dot on={item.online} />
-                <Text style={s.name} numberOfLines={1}>
-                  {item.name}
-                </Text>
-              </View>
-              <Text style={s.meta}>
-                {item.online ? 'Online' : 'Offline'} · {ago(item.lastSeenAt)}
-                {item.variableCount !== undefined ? ` · ${item.variableCount} variables` : ''}
+        <Pressable
+          onPress={() => router.push({ pathname: '/device/[id]', params: { id: item.id } })}
+          style={({ pressed }) => [s.row, pressed && { opacity: 0.7 }]}
+        >
+          <View style={s.rowMain}>
+            <View style={s.rowTitle}>
+              <Dot on={item.online} />
+              <Text style={s.name} numberOfLines={1}>
+                {item.name}
               </Text>
             </View>
-            <Text style={s.chev}>›</Text>
-          </Pressable>
-        </Link>
+            <Text style={s.meta}>
+              {item.online ? 'Online' : 'Offline'} · {ago(item.lastSeenAt)}
+              {item.variableCount !== undefined ? ` · ${item.variableCount} variables` : ''}
+            </Text>
+          </View>
+          <Text style={s.chev}>›</Text>
+        </Pressable>
       )}
     />
   );
