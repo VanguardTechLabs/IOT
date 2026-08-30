@@ -164,19 +164,32 @@ function VariableRow({
   writing: boolean;
   onWrite: (key: string, value: string) => void;
 }) {
-  // The database stores int | float | bool | string. Matching on 'boolean' or
-  // 'number' — neither of which exists — sent every variable to the read-only
-  // number widget, so a writable relay rendered as a dash instead of a switch.
-  const numeric = row.type === 'int' || row.type === 'float';
-  const type: WidgetType = row.writable
-    ? row.type === 'bool'
-      ? 'toggle'
-      : numeric
-        ? 'slider'
-        : 'number'
-    : row.type === 'bool'
+  // The database stores int | float | bool | string, so matching on 'boolean'
+  // or 'number' matched nothing and every variable fell through to a read-only
+  // display.
+  //
+  // Type alone is not enough either. inferType() reads the string "1" a device
+  // sends as an INT, so nearly every relay in the system is typed int rather
+  // than bool — bool only happens when someone sets it by hand or the firmware
+  // sends "on"/"true". Treating writable ints as sliders would therefore put a
+  // 0-100 slider on almost every relay, and let someone send 47 to a device
+  // that understands 0 and 1.
+  //
+  // So an integer is a switch unless its configured range says otherwise. A
+  // slider only appears where a real range exists to slide across.
+  const hasRange = row.minValue !== null && row.maxValue !== null;
+  const spansMoreThanOnOff = hasRange && row.maxValue! - row.minValue! > 1;
+  const switchLike = row.type === 'bool' || (row.type === 'int' && !spansMoreThanOnOff);
+
+  const type: WidgetType = !row.writable
+    ? switchLike
       ? 'led'
-      : 'number';
+      : 'number'
+    : switchLike
+      ? 'toggle'
+      : row.type === 'float' || row.type === 'int'
+        ? 'slider'
+        : 'number';
 
   return (
     <Widget
@@ -189,7 +202,15 @@ function VariableRow({
         y: 0,
         w: 12,
         h: 2,
-        config: { label: row.label ?? row.key, unit: row.unit ?? undefined },
+        config: {
+          label: row.label ?? row.key,
+          unit: row.unit ?? undefined,
+          // The slider's real bounds when they exist. Falling back to 0-100 for
+          // an unconfigured variable is a guess, but a visible one — the value
+          // is shown above the track before anything is sent.
+          ...(hasRange ? { min: row.minValue!, max: row.maxValue! } : {}),
+          ...(row.type === 'int' ? { decimals: 0 } : {}),
+        },
       }}
       state={row}
       points={[]}

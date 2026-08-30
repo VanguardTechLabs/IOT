@@ -149,6 +149,11 @@ export const telemetryRoutes: FastifyPluginAsync = async (app) => {
         unit: tables.variables.unit,
         writable: tables.variables.writable,
         color: tables.variables.color,
+        // Needed by any client rendering a control: without the range there is
+        // no way to distinguish a relay from a 0-255 setpoint, and guessing
+        // wrong means writing 47 to something that only understands 0 and 1.
+        minValue: tables.variables.minValue,
+        maxValue: tables.variables.maxValue,
         ts: tables.variableState.ts,
         valueNum: tables.variableState.valueNum,
         valueText: tables.variableState.valueText,

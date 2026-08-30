@@ -240,6 +240,9 @@ export interface VariableState {
   type: VariableType;
   writable: boolean;
   color: string | null;
+  /** Configured range, null when the operator never set one. */
+  minValue: number | null;
+  maxValue: number | null;
   ts: string | null;
   valueNum: number | null;
   valueText: string | null;
