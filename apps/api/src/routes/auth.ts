@@ -21,6 +21,22 @@ const registerSchema = credentialsSchema.extend({
   name: z.string().trim().min(1).max(80),
 });
 
+/** /refresh and /logout accept the token in the body for clients without cookies. */
+const refreshSchema = z.object({ refreshToken: z.string().min(1).max(200).optional() });
+
+/**
+ * Native clients ask for the refresh token in the response body.
+ *
+ * A browser must never get it that way — httpOnly is the whole reason script
+ * cannot steal a session there. But React Native has no cookie jar that survives
+ * an app restart, so the token goes to the OS keychain instead, which is the
+ * equivalent protection on that platform. Opt-in by header, so the web's
+ * behaviour is byte-identical and no browser receives one by accident.
+ */
+function wantsBodyToken(req: { headers: Record<string, unknown> }): boolean {
+  return String(req.headers['x-pulse-client'] ?? '').toLowerCase() === 'native';
+}
+
 export const authRoutes: FastifyPluginAsync = async (app) => {
   const refreshMaxAge = env.REFRESH_TOKEN_TTL_DAYS * 86_400;
 
@@ -28,13 +44,19 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     reply: FastifyReply,
     user: { id: string; email: string; name: string; role: string; planId: string },
     userAgent?: string,
+    bodyToken = false,
   ) => {
     const refreshToken = newSecret(32);
     await persistRefreshToken(user.id, refreshToken, userAgent);
-    reply.setCookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions(refreshMaxAge));
+    // One or the other, never both: a token that exists in two places has two
+    // chances to leak and only one of them can be revoked by clearing a cookie.
+    if (!bodyToken) {
+      reply.setCookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions(refreshMaxAge));
+    }
     const plan = await getUserPlan(user.id);
     return {
       accessToken: signAccessToken(app, user),
+      ...(bodyToken ? { refreshToken } : {}),
       user: { id: user.id, email: user.email, name: user.name, role: user.role },
       plan,
     };
@@ -68,7 +90,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       });
 
     reply.code(201);
-    return issueSession(reply, created!, req.headers['user-agent']);
+    return issueSession(reply, created!, req.headers['user-agent'], wantsBodyToken(req));
   });
 
   app.post('/login', { config: { rateLimit: { max: 15, timeWindow: '5 minutes' } } }, async (req, reply) => {
@@ -97,11 +119,12 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     );
     if (!user || !ok) throw unauthorized('Invalid email or password');
 
-    return issueSession(reply, user, req.headers['user-agent']);
+    return issueSession(reply, user, req.headers['user-agent'], wantsBodyToken(req));
   });
 
   app.post('/refresh', async (req, reply) => {
-    const token = req.cookies[REFRESH_COOKIE];
+    const fromBody = parse(refreshSchema, req.body ?? {}).refreshToken;
+    const token = req.cookies[REFRESH_COOKIE] ?? fromBody;
     if (!token) throw unauthorized('No session');
 
     const userId = await consumeRefreshToken(token);
@@ -124,11 +147,13 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
 
     const user = rows[0];
     if (!user) throw unauthorized('Account no longer exists');
-    return issueSession(reply, user, req.headers['user-agent']);
+    // Rotation: consumeRefreshToken already burned the old one, so a native
+    // client needs the replacement handed back the same way it sent the original.
+    return issueSession(reply, user, req.headers['user-agent'], Boolean(fromBody) || wantsBodyToken(req));
   });
 
   app.post('/logout', async (req, reply) => {
-    const token = req.cookies[REFRESH_COOKIE];
+    const token = req.cookies[REFRESH_COOKIE] ?? parse(refreshSchema, req.body ?? {}).refreshToken;
     if (token) await consumeRefreshToken(token);
     reply.clearCookie(REFRESH_COOKIE, refreshCookieOptions(0));
     return { ok: true };

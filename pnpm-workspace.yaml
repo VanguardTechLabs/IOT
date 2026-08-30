@@ -1,3 +1,6 @@
 packages:
   - "packages/*"
   - "apps/*"
+  # Metro resolves modules poorly through pnpm's symlinked store, and EAS Build
+  # expects a self-contained project. apps/mobile keeps its own npm lockfile.
+  - "!apps/mobile"
