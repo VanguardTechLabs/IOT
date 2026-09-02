@@ -44,6 +44,8 @@ const widgetConfigSchema = z
     label: z.string().trim().max(80).optional(),
     unit: z.string().trim().max(16).optional(),
     color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+    /** card background; absent keeps the default dark surface */
+    background: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
     min: z.number().optional(),
     max: z.number().optional(),
     decimals: z.number().int().min(0).max(6).optional(),
