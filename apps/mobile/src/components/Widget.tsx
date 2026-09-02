@@ -52,42 +52,87 @@ function fraction(value: number | null, min: number, max: number): number {
   return Math.min(1, Math.max(0, (value - min) / (max - min)));
 }
 
+/**
+ * Perceived brightness of a hex colour, 0-1.
+ *
+ * Rec. 601 luma, matching the web exactly so the same background does not read
+ * as light on one and dark on the other. Green looks far brighter than blue at
+ * the same value, which a plain channel average gets wrong.
+ */
+function luminance(hex?: string): number {
+  if (!hex) return 0;
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return 0;
+  let h = m[1]!;
+  if (h.length === 3)
+    h = h
+      .split('')
+      .map((ch) => ch + ch)
+      .join('');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+
 export function Widget(props: WidgetProps) {
   const { widget, state } = props;
   const cfg = widget.config ?? {};
   const title = cfg.label ?? state?.label ?? state?.key ?? widget.type;
   const unit = cfg.unit ?? state?.unit ?? '';
 
+  // A pale background chosen on the web would otherwise leave this card's
+  // light-on-dark text unreadable on the phone.
+  const bg = cfg.background;
+  const light = luminance(bg) > 0.6;
+  const titleColour = light ? '#475569' : c.textDim;
+  const stampColour = light ? '#64748b' : c.textFaint;
+
   return (
-    <View style={[s.card, { width: props.width }]}>
-      <Text style={s.title} numberOfLines={1}>
+    <View style={[s.card, { width: props.width }, bg ? { backgroundColor: bg } : null]}>
+      <Text style={[s.title, { color: titleColour }]} numberOfLines={1}>
         {title}
       </Text>
-      <Body {...props} unit={unit} />
+      <Body {...props} unit={unit} light={light} />
       {state?.ts ? (
-        <Text style={s.stamp}>{new Date(state.ts).toLocaleTimeString()}</Text>
+        <Text style={[s.stamp, { color: stampColour }]}>
+          {new Date(state.ts).toLocaleTimeString()}
+        </Text>
       ) : widget.type !== 'text' ? (
-        <Text style={s.stamp}>never reported</Text>
+        <Text style={[s.stamp, { color: stampColour }]}>never reported</Text>
       ) : null}
     </View>
   );
 }
 
-function Body({ widget, state, points, width, onWrite, writing, unit }: WidgetProps & { unit: string }) {
+function Body({
+  widget,
+  state,
+  points,
+  width,
+  onWrite,
+  writing,
+  unit,
+  light,
+}: WidgetProps & { unit: string; light: boolean }) {
   const cfg = widget.config ?? {};
   const min = cfg.min ?? 0;
   const max = cfg.max ?? 100;
   const decimals = cfg.decimals ?? 1;
   const colour = cfg.color ?? c.accent;
   const value = num(state);
+  // React Native does not cascade colour from a View, so every Text that
+  // carries a reading has to be told explicitly.
+  const text = light ? '#0f172a' : c.text;
+  const dim = light ? '#475569' : c.textDim;
 
   switch (widget.type) {
     case 'number':
       return (
         <View style={s.centre}>
-          <Text style={s.big}>
+          <Text style={[s.big, { color: text }]}>
             {fmt(value, decimals)}
-            {unit ? <Text style={s.unit}> {unit}</Text> : null}
+            {unit ? <Text style={[s.unit, { color: dim }]}> {unit}</Text> : null}
           </Text>
         </View>
       );
@@ -95,7 +140,7 @@ function Body({ widget, state, points, width, onWrite, writing, unit }: WidgetPr
     case 'text':
       return (
         <View style={s.centre}>
-          <Text style={s.bodyText}>{cfg.body ?? state?.valueText ?? ''}</Text>
+          <Text style={[s.bodyText, { color: text }]}>{cfg.body ?? state?.valueText ?? ''}</Text>
         </View>
       );
 
@@ -149,9 +194,9 @@ function Body({ widget, state, points, width, onWrite, writing, unit }: WidgetPr
               />
             ) : null}
           </Svg>
-          <Text style={[s.big, { marginTop: -size * 0.3 }]}>
+          <Text style={[s.big, { color: text, marginTop: -size * 0.3 }]}>
             {fmt(value, decimals)}
-            {unit ? <Text style={s.unit}> {unit}</Text> : null}
+            {unit ? <Text style={[s.unit, { color: dim }]}> {unit}</Text> : null}
           </Text>
         </View>
       );
@@ -177,9 +222,9 @@ function Body({ widget, state, points, width, onWrite, writing, unit }: WidgetPr
               opacity={0.85}
             />
           </Svg>
-          <Text style={s.mid}>
+          <Text style={[s.mid, { color: text }]}>
             {fmt(value, decimals)}
-            {unit ? <Text style={s.unit}> {unit}</Text> : null}
+            {unit ? <Text style={[s.unit, { color: dim }]}> {unit}</Text> : null}
           </Text>
         </View>
       );
@@ -220,6 +265,7 @@ function Body({ widget, state, points, width, onWrite, writing, unit }: WidgetPr
           step={cfg.step ?? 1}
           unit={unit}
           decimals={decimals}
+          light={light}
           colour={colour}
           disabled={!state?.writable || writing}
           onCommit={(v) => onWrite(state?.key ?? '', String(v))}
@@ -349,6 +395,7 @@ function SliderControl({
   unit,
   decimals,
   colour,
+  light,
   disabled,
   onCommit,
 }: {
@@ -359,6 +406,7 @@ function SliderControl({
   unit: string;
   decimals: number;
   colour: string;
+  light: boolean;
   disabled: boolean;
   onCommit: (value: number) => void;
 }) {
@@ -367,9 +415,9 @@ function SliderControl({
 
   return (
     <View style={{ gap: space.xs }}>
-      <Text style={[s.mid, { textAlign: 'center' }]}>
+      <Text style={[s.mid, { textAlign: 'center', color: light ? '#0f172a' : c.text }]}>
         {fmt(shown, decimals)}
-        {unit ? <Text style={s.unit}> {unit}</Text> : null}
+        {unit ? <Text style={[s.unit, { color: light ? '#475569' : c.textDim }]}> {unit}</Text> : null}
       </Text>
       <Slider
         minimumValue={min}

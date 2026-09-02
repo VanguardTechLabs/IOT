@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -19,7 +20,7 @@ import {
   type Widget,
 } from '../lib/api';
 import { getSocket, type TelemetryEvent } from '../lib/socket';
-import { WidgetView } from '../components/widgets/WidgetView';
+import { WidgetView, isLightBackground } from '../components/widgets/WidgetView';
 import { WidgetEditor, type WidgetDraft } from '../components/WidgetEditor';
 import { Alert, Button, EmptyState, Spinner } from '../components/ui';
 
@@ -320,7 +321,14 @@ export function DashboardDetailPage() {
                     </button>
                   )}
                   {w.type === 'chart' ? (
-                    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+                    <div
+                      className={clsx(
+                        'flex h-full flex-col overflow-hidden rounded-xl border border-slate-800 p-3',
+                        !w.config.background && 'bg-slate-900/60',
+                        isLightBackground(w.config.background) && 'widget-light',
+                      )}
+                      style={w.config.background ? { background: w.config.background } : undefined}
+                    >
                       <div className="drag-handle mb-2 shrink-0 cursor-grab truncate text-xs font-medium uppercase tracking-wide text-slate-400">
                         {w.config.label ?? entries.get(w.variableId ?? '')?.label ?? 'Chart'}
                       </div>

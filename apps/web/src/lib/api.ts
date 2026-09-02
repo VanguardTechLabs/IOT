@@ -207,6 +207,8 @@ export const VARIABLE_FREE_WIDGETS: readonly WidgetType[] = ['text'];
 
 export interface WidgetConfig {
   label?: string;
+  /** Card background. Undefined keeps the default dark surface. */
+  background?: string;
   unit?: string;
   color?: string;
   min?: number;

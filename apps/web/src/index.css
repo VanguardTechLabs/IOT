@@ -110,3 +110,29 @@
 .value-flash {
   animation: value-flash 0.6s ease-out;
 }
+
+/*
+ * A widget with a custom background.
+ *
+ * The palette assumes a dark card, so a pale background chosen in the editor
+ * would leave slate-300 text on near-white — legible in the colour picker and
+ * unreadable on the dashboard. `widget-light` is set when the chosen colour is
+ * light, and re-points the greys that carry text.
+ *
+ * Only text colours are touched. Accent colours stay as configured: a gauge arc
+ * or an LED is meant to be the colour the user picked, whatever it sits on.
+ */
+.widget-light {
+  color: #0f172a;
+}
+.widget-light .text-slate-100,
+.widget-light .text-slate-200,
+.widget-light .text-slate-300 {
+  color: #0f172a;
+}
+.widget-light .text-slate-400 {
+  color: #475569;
+}
+.widget-light .text-slate-500 {
+  color: #64748b;
+}

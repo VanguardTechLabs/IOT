@@ -379,6 +379,37 @@ export function WidgetEditor({
           )}
         </div>
 
+        {/*
+          * Background applies to every widget type, including text notes and
+          * charts, so it sits outside the USES_COLOR guard. Empty means "leave
+          * it alone" rather than black — a colour input cannot express absent,
+          * so the reset button is the only way back to the default.
+          */}
+        <Field label="Background">
+          <div className="flex items-center gap-3">
+            <input
+              type="color"
+              value={config.background ?? '#0f172a'}
+              onChange={(e) => patch({ background: e.target.value })}
+              className="h-9 w-16 cursor-pointer rounded border border-slate-700 bg-slate-950"
+            />
+            <Input
+              value={config.background ?? ''}
+              onChange={(e) => patch({ background: e.target.value || undefined })}
+              placeholder="default"
+            />
+            {config.background && (
+              <button
+                type="button"
+                onClick={() => patch({ background: undefined })}
+                className="shrink-0 rounded-md border border-slate-700 px-2 py-1.5 text-xs text-slate-400 hover:text-white"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </Field>
+
         {USES_COLOR.includes(type) && (
         <Field label="Colour">
           <div className="flex items-center gap-3">

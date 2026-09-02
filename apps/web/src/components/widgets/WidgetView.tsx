@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import { useEffect, useRef, useState } from 'react';
 import type { StateEntry, Widget } from '../../lib/api';
 import { relativeTime } from '../../lib/format';
@@ -61,9 +62,48 @@ function display(widget: Widget, entry?: StateEntry): string {
 
 // ── Shell ───────────────────────────────────────────────────────────────────
 
-function Frame({ title, children }: { title: string; children: React.ReactNode }) {
+/**
+ * Perceived brightness of a hex colour, 0–1.
+ *
+ * Rec. 601 luma: green reads far brighter to the eye than blue at the same
+ * value, so a plain channel average would call #0000ff light and #00ff00 dark.
+ * Anything unparseable returns 0 and is treated as dark, which is the default.
+ */
+export function luminance(hex?: string): number {
+  if (!hex) return 0;
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return 0;
+  let h = m[1]!;
+  if (h.length === 3) h = h.split('').map((ch) => ch + ch).join('');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+
+/** True when text on this background needs to be dark rather than light. */
+export function isLightBackground(hex?: string): boolean {
+  return luminance(hex) > 0.6;
+}
+
+export function Frame({
+  title,
+  background,
+  children,
+}: {
+  title: string;
+  background?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+    <div
+      className={clsx(
+        'flex h-full flex-col overflow-hidden rounded-xl border border-slate-800 p-3',
+        !background && 'bg-slate-900/60',
+        isLightBackground(background) && 'widget-light',
+      )}
+      style={background ? { background } : undefined}
+    >
       <div className="drag-handle mb-2 shrink-0 cursor-grab truncate text-xs font-medium uppercase tracking-wide text-slate-400 active:cursor-grabbing">
         {title}
       </div>
@@ -385,5 +425,9 @@ export function WidgetView(props: WidgetViewProps) {
     }
   })();
 
-  return <Frame title={title}>{body}</Frame>;
+  return (
+    <Frame title={title} background={widget.config.background}>
+      {body}
+    </Frame>
+  );
 }

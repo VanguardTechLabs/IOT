@@ -50,8 +50,16 @@ function quoteIdent(key: string): string {
   return `"${key.replace(/"/g, '""')}"`;
 }
 
-/** The three columns every wide export starts with. */
-const FIXED_COLUMNS = ['timestamp_utc', 'timestamp_local', 'timezone'];
+/**
+ * The fixed columns every wide export starts with.
+ *
+ * date_local and time_local are split out because timestamp_local, which does
+ * carry seconds, is read by Excel as a datetime and re-displayed as
+ * dd/mm/yyyy hh:mm — the seconds are in the file but invisible on screen, which
+ * is indistinguishable from missing to whoever opened it. Two narrower columns
+ * survive that reformatting and are easier to sort and filter on besides.
+ */
+const FIXED_COLUMNS = ['timestamp_utc', 'timestamp_local', 'date_local', 'time_local', 'timezone'];
 
 /**
  * A variable may legitimately be called "timezone". Postgres is happy to emit two
@@ -171,6 +179,8 @@ ${commandPivot}
       COPY (
         SELECT to_char(t.ts AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS timestamp_utc,
                to_char(t.ts AT TIME ZONE '${tz}', 'YYYY-MM-DD HH24:MI:SS')        AS timestamp_local,
+               to_char(t.ts AT TIME ZONE '${tz}', 'YYYY-MM-DD')                   AS date_local,
+               to_char(t.ts AT TIME ZONE '${tz}', 'HH24:MI:SS')                   AS time_local,
                '${tz}'   AS timezone,
                'received' AS direction,
                v.key    AS variable,
@@ -187,6 +197,8 @@ ${commandPivot}
       COPY (
         SELECT to_char(merged.ts AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS timestamp_utc,
                to_char(merged.ts AT TIME ZONE '${tz}', 'YYYY-MM-DD HH24:MI:SS')        AS timestamp_local,
+               to_char(merged.ts AT TIME ZONE '${tz}', 'YYYY-MM-DD')                   AS date_local,
+               to_char(merged.ts AT TIME ZONE '${tz}', 'HH24:MI:SS')                   AS time_local,
                '${tz}'   AS timezone,
                merged.direction,
                ${columnList}
